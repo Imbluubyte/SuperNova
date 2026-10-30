@@ -148,6 +148,12 @@ impl Parser {
                     }
                 }
             }
+            Tok::Ident(ref n) if n == "elif" => {
+                return Err(CompileError::new(
+                    "'elif' is not part of SuperNova; use 'orif'",
+                    span,
+                ))
+            }
             Tok::Var | Tok::Const => self.var_decl(false)?,
             Tok::Fn | Tok::Async => StmtKind::Fn(self.fn_decl()?),
             Tok::Class => StmtKind::Class(self.class_decl()?),

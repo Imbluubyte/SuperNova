@@ -1,0 +1,1174 @@
+//! Type checker and C99 emitter.
+//!
+//! Every expression is typed while it is lowered to C, so there is no separate
+//! untyped-to-typed pass. Functions with unannotated parameters are
+//! specialised ("monomorphised") per distinct tuple of argument types; each
+//! specialisation is type-checked and emitted as its own C function.
+//!
+//! Evaluation order is left-to-right everywhere. C leaves operand and argument
+//! order unspecified, so when two operands may have side effects they are
+//! hoisted into temporaries (see `seq2` and the call lowering).
+
+use crate::ast::*;
+use crate::lexer::{CompileError, Span};
+use std::collections::HashMap;
+
+type R<T> = Result<T, CompileError>;
+
+fn err<T>(msg: impl Into<String>, span: Span) -> R<T> {
+    Err(CompileError::new(msg, span))
+}
+
+fn nyi<T>(what: &str, span: Span) -> R<T> {
+    err(
+        format!("{} not implemented yet (see ROADMAP.md)", what),
+        span,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Ty {
+    Int,
+    Float,
+    Bool,
+    Str,
+    Null,
+    Void,
+}
+
+impl Ty {
+    fn name(self) -> &'static str {
+        match self {
+            Ty::Int => "Int",
+            Ty::Float => "Float",
+            Ty::Bool => "Bool",
+            Ty::Str => "String",
+            Ty::Null => "null",
+            Ty::Void => "nothing",
+        }
+    }
+    fn c(self) -> &'static str {
+        match self {
+            Ty::Int => "int64_t",
+            Ty::Float => "double",
+            Ty::Bool => "bool",
+            Ty::Str => "SnStr*",
+            Ty::Null => "int8_t",
+            Ty::Void => "void",
+        }
+    }
+    fn is_num(self) -> bool {
+        matches!(self, Ty::Int | Ty::Float)
+    }
+}
+
+/// A lowered expression: C text, static type, and whether evaluating it is
+/// free of side effects (no calls).
+struct E {
+    c: String,
+    ty: Ty,
+    pure: bool,
+}
+
+impl E {
+    fn new(c: impl Into<String>, ty: Ty, pure: bool) -> E {
+        E { c: c.into(), ty, pure }
+    }
+}
+
+#[derive(Clone)]
+struct Var {
+    ty: Ty,
+    is_const: bool,
+    cname: String,
+}
+
+struct Inst {
+    cname: String,
+    /// None while an unannotated function is still being checked.
+    ret: Option<Ty>,
+}
+
+struct Ctx {
+    scopes: Vec<HashMap<String, Var>>,
+    ret_decl: Option<Ty>,
+    rets: Vec<Ty>,
+    in_fn: bool,
+    loop_depth: usize,
+    out: String,
+    indent: usize,
+}
+
+impl Ctx {
+    fn new(in_fn: bool) -> Ctx {
+        Ctx {
+            scopes: vec![HashMap::new()],
+            ret_decl: None,
+            rets: Vec::new(),
+            in_fn,
+            loop_depth: 0,
+            out: String::new(),
+            indent: 1,
+        }
+    }
+}
+
+const BUILTINS: [&str; 4] = ["print", "str", "int", "float"];
+
+struct Gen<'a> {
+    file: String,
+    fns: HashMap<String, &'a FnDecl>,
+    fn_order: Vec<&'a FnDecl>,
+    globals: HashMap<String, Var>,
+    global_decls: String,
+    protos: String,
+    bodies: String,
+    lits: String,
+    lit_ids: HashMap<String, String>,
+    insts: HashMap<(String, Vec<Ty>), Inst>,
+    tmp: usize,
+    cx: Ctx,
+}
+
+pub fn generate<'a>(module: &'a Module, file: &str) -> R<String> {
+    let mut g = Gen {
+        file: file.to_string(),
+        fns: HashMap::new(),
+        fn_order: Vec::new(),
+        globals: HashMap::new(),
+        global_decls: String::new(),
+        protos: String::new(),
+        bodies: String::new(),
+        lits: String::new(),
+        lit_ids: HashMap::new(),
+        insts: HashMap::new(),
+        tmp: 0,
+        cx: Ctx::new(false),
+    };
+    g.run(module)
+}
+
+fn c_escape(s: &str) -> String {
+    let mut o = String::new();
+    for &b in s.as_bytes() {
+        match b {
+            b'"' => o.push_str("\\\""),
+            b'\\' => o.push_str("\\\\"),
+            b'?' => o.push_str("\\?"),
+            0x20..=0x7e => o.push(b as char),
+            _ => o.push_str(&format!("\\{:03o}", b)),
+        }
+    }
+    o
+}
+
+fn fmt_float(f: f64) -> String {
+    let s = format!("{:?}", f);
+    if s.contains('.') || s.contains('e') || s.contains("inf") || s.contains("NaN") {
+        s
+    } else {
+        format!("{}.0", s)
+    }
+}
+
+fn op_sym(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::FloorDiv => "//",
+        BinOp::Mod => "%",
+        BinOp::Pow => "**",
+        BinOp::Eq => "==",
+        BinOp::Ne => "!=",
+        BinOp::Lt => "<",
+        BinOp::Le => "<=",
+        BinOp::Gt => ">",
+        BinOp::Ge => ">=",
+        BinOp::And => "and",
+        BinOp::Or => "or",
+    }
+}
+
+fn to_f(c: &str, from: Ty) -> String {
+    if from == Ty::Int {
+        format!("((double)({}))", c)
+    } else {
+        c.to_string()
+    }
+}
+
+fn always_returns(body: &[Stmt]) -> bool {
+    body.iter().any(stmt_returns)
+}
+
+fn stmt_returns(s: &Stmt) -> bool {
+    match &s.kind {
+        StmtKind::Return(_) | StmtKind::Throw(_) => true,
+        StmtKind::If { branches, else_body } => match else_body {
+            Some(e) => branches.iter().all(|(_, b)| always_returns(b)) && always_returns(e),
+            None => false,
+        },
+        StmtKind::Match { cases, default, .. } => match default {
+            Some(d) => cases.iter().all(|(_, b)| always_returns(b)) && always_returns(d),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+impl<'a> Gen<'a> {
+    fn run(&mut self, module: &'a Module) -> R<String> {
+        // Pass 1: collect functions so they can be used before their declaration.
+        for s in &module.items {
+            if let StmtKind::Fn(f) = &s.kind {
+                if BUILTINS.contains(&f.name.as_str()) {
+                    return err(format!("cannot redefine builtin function '{}'", f.name), f.span);
+                }
+                if self.fns.insert(f.name.clone(), f).is_some() {
+                    return err(format!("function '{}' is already defined", f.name), f.span);
+                }
+                if f.is_async {
+                    return nyi("async functions", f.span);
+                }
+                self.fn_order.push(f);
+            }
+        }
+        // Pass 2: top-level statements form the program entry point.
+        for s in &module.items {
+            if !matches!(s.kind, StmtKind::Fn(_)) {
+                self.stmt(s)?;
+            }
+        }
+        // Pass 3: type-check functions whose parameters are all annotated even if never called.
+        let order = self.fn_order.clone();
+        for f in order {
+            if f.params.iter().all(|p| p.ty.is_some()) {
+                let mut ptys = Vec::new();
+                for p in &f.params {
+                    ptys.push(self.resolve_type(p.ty.as_ref().unwrap(), f.span)?);
+                }
+                self.instance(f, ptys, f.span)?;
+            }
+        }
+        let main_body = std::mem::take(&mut self.cx.out);
+        let mut out = String::new();
+        out.push_str("/* generated by snc — do not edit */\n");
+        out.push_str(&self.lits);
+        out.push_str(&self.global_decls);
+        out.push_str(&self.protos);
+        out.push_str(&self.bodies);
+        out.push_str("static void sn_main(void) {\n");
+        out.push_str(&main_body);
+        out.push_str("}\n\nint main(void) {\n    sn_main();\n    return 0;\n}\n");
+        Ok(out)
+    }
+
+    // ---------------- helpers ----------------
+
+    fn loc(&self, span: Span) -> String {
+        format!("\"{}:{}:{}\"", c_escape(&self.file), span.line, span.col)
+    }
+
+    fn line(&mut self, s: &str) {
+        for _ in 0..self.cx.indent {
+            self.cx.out.push_str("    ");
+        }
+        self.cx.out.push_str(s);
+        self.cx.out.push('\n');
+    }
+
+    fn fresh(&mut self) -> usize {
+        self.tmp += 1;
+        self.tmp
+    }
+
+    fn str_lit(&mut self, s: &str) -> String {
+        if let Some(n) = self.lit_ids.get(s) {
+            return n.clone();
+        }
+        let id = format!("slit{}", self.lit_ids.len());
+        self.lits.push_str(&format!(
+            "static const struct {{ int64_t len; char d[{}]; }} {} = {{ {}, \"{}\" }};\n",
+            s.len() + 1,
+            id,
+            s.len(),
+            c_escape(s)
+        ));
+        let r = format!("((SnStr*)&{})", id);
+        self.lit_ids.insert(s.to_string(), r.clone());
+        r
+    }
+
+    fn resolve_type(&self, t: &TypeExpr, span: Span) -> R<Ty> {
+        match t {
+            TypeExpr::Named(n) => match n.as_str() {
+                "Int" => Ok(Ty::Int),
+                "Float" => Ok(Ty::Float),
+                "Bool" => Ok(Ty::Bool),
+                "String" => Ok(Ty::Str),
+                other => err(format!("unknown type '{}'", other), span),
+            },
+            TypeExpr::List(_) => nyi("List types", span),
+            TypeExpr::Optional(_) => nyi("optional types", span),
+        }
+    }
+
+    fn lookup(&self, name: &str, span: Span) -> R<Var> {
+        for sc in self.cx.scopes.iter().rev() {
+            if let Some(v) = sc.get(name) {
+                return Ok(v.clone());
+            }
+        }
+        if let Some(v) = self.globals.get(name) {
+            return Ok(v.clone());
+        }
+        if self.fns.contains_key(name) {
+            return nyi("using functions as values", span);
+        }
+        err(format!("undefined variable '{}'", name), span)
+    }
+
+    /// Implicit conversions: only Int -> Float.
+    fn coerce(&self, c: String, from: Ty, to: Ty) -> Option<String> {
+        if from == to {
+            Some(c)
+        } else if from == Ty::Int && to == Ty::Float {
+            Some(format!("((double)({}))", c))
+        } else {
+            None
+        }
+    }
+
+    fn val(&mut self, e: &Expr) -> R<E> {
+        let r = self.expr(e)?;
+        if r.ty == Ty::Void {
+            return err("this expression produces no value", e.span);
+        }
+        Ok(r)
+    }
+
+    /// Combine two operands preserving left-to-right evaluation.
+    fn seq2(&mut self, l: &E, r: &E, f: impl Fn(&str, &str) -> String) -> String {
+        if !l.pure && !r.pure {
+            let n = self.fresh();
+            let (a, b) = (format!("t{}a", n), format!("t{}b", n));
+            format!(
+                "({{ {} {} = {}; {} {} = {}; {}; }})",
+                l.ty.c(),
+                a,
+                l.c,
+                r.ty.c(),
+                b,
+                r.c,
+                f(&a, &b)
+            )
+        } else {
+            f(&l.c, &r.c)
+        }
+    }
+
+    // ---------------- functions ----------------
+
+    fn instance(&mut self, decl: &'a FnDecl, ptys: Vec<Ty>, span: Span) -> R<(String, Ty)> {
+        let key = (decl.name.clone(), ptys.clone());
+        if let Some(inst) = self.insts.get(&key) {
+            return match inst.ret {
+                Some(r) => Ok((inst.cname.clone(), r)),
+                None => err(
+                    format!(
+                        "recursive function '{}' needs a return type annotation (-> Type)",
+                        decl.name
+                    ),
+                    span,
+                ),
+            };
+        }
+        let declared = match &decl.ret {
+            Some(t) => Some(self.resolve_type(t, decl.span)?),
+            None => None,
+        };
+        let cname = format!("f{}_{}", self.insts.len(), decl.name);
+        self.insts.insert(key.clone(), Inst { cname: cname.clone(), ret: declared });
+
+        let mut cx = Ctx::new(true);
+        cx.ret_decl = declared;
+        let mut params_c = Vec::new();
+        for (p, t) in decl.params.iter().zip(&ptys) {
+            let pc = format!("v_{}", p.name);
+            if cx.scopes[0]
+                .insert(p.name.clone(), Var { ty: *t, is_const: false, cname: pc.clone() })
+                .is_some()
+            {
+                return err(format!("duplicate parameter '{}'", p.name), decl.span);
+            }
+            params_c.push(format!("{} {}", t.c(), pc));
+        }
+        let saved = std::mem::replace(&mut self.cx, cx);
+        let res = self.fn_body(decl, declared);
+        let fcx = std::mem::replace(&mut self.cx, saved);
+        let ret = res?;
+        self.insts.get_mut(&key).unwrap().ret = Some(ret);
+        let sig = format!(
+            "static {} {}({})",
+            ret.c(),
+            cname,
+            if params_c.is_empty() { "void".to_string() } else { params_c.join(", ") }
+        );
+        self.protos.push_str(&format!("{};\n", sig));
+        self.bodies.push_str(&format!("{} {{\n{}}}\n\n", sig, fcx.out));
+        Ok((cname, ret))
+    }
+
+    fn fn_body(&mut self, decl: &'a FnDecl, declared: Option<Ty>) -> R<Ty> {
+        for s in &decl.body {
+            self.stmt(s)?;
+        }
+        let ret = match declared {
+            Some(t) => t,
+            None => {
+                let rets = self.cx.rets.clone();
+                match rets.first() {
+                    None => Ty::Void,
+                    Some(&first) => {
+                        if let Some(other) = rets.iter().find(|&&t| t != first) {
+                            return err(
+                                format!(
+                                    "function '{}' returns both {} and {}; annotate the return type or make them consistent",
+                                    decl.name,
+                                    first.name(),
+                                    other.name()
+                                ),
+                                decl.span,
+                            );
+                        }
+                        first
+                    }
+                }
+            }
+        };
+        if ret != Ty::Void && !always_returns(&decl.body) {
+            return err(
+                format!(
+                    "function '{}' may reach its end without returning a value",
+                    decl.name
+                ),
+                decl.span,
+            );
+        }
+        Ok(ret)
+    }
+
+    fn call(&mut self, callee: &Expr, args: &[Arg], span: Span) -> R<E> {
+        let ExprKind::Ident(name) = &callee.kind else {
+            return nyi("calling values that are not plain function names", span);
+        };
+        if BUILTINS.contains(&name.as_str()) {
+            return self.builtin(name, args, span);
+        }
+        let Some(&decl) = self.fns.get(name) else {
+            return err(format!("undefined function '{}'", name), span);
+        };
+
+        // Bind arguments to parameter slots; remember source order for evaluation.
+        let n = decl.params.len();
+        let mut slots: Vec<Option<E>> = (0..n).map(|_| None).collect();
+        let mut written: Vec<usize> = Vec::new();
+        let mut seen_named = false;
+        for (i, a) in args.iter().enumerate() {
+            let idx = match &a.name {
+                None => {
+                    if seen_named {
+                        return err("positional argument after named argument", a.value.span);
+                    }
+                    if i >= n {
+                        return err(
+                            format!("'{}' takes {} argument(s), but {} were given", name, n, args.len()),
+                            span,
+                        );
+                    }
+                    i
+                }
+                Some(pn) => {
+                    seen_named = true;
+                    match decl.params.iter().position(|p| &p.name == pn) {
+                        Some(k) => k,
+                        None => {
+                            return err(
+                                format!("'{}' has no parameter named '{}'", name, pn),
+                                a.value.span,
+                            )
+                        }
+                    }
+                }
+            };
+            if slots[idx].is_some() {
+                return err(
+                    format!("argument '{}' given more than once", decl.params[idx].name),
+                    a.value.span,
+                );
+            }
+            slots[idx] = Some(self.val(&a.value)?);
+            written.push(idx);
+        }
+        // Defaults are evaluated in a context with no caller locals.
+        for i in 0..n {
+            if slots[i].is_none() {
+                match &decl.params[i].default {
+                    Some(d) => {
+                        let saved = std::mem::replace(&mut self.cx, Ctx::new(true));
+                        let r = self.val(d);
+                        self.cx = saved;
+                        slots[i] = Some(r?);
+                    }
+                    None => {
+                        return err(
+                            format!("missing argument '{}' in call to '{}'", decl.params[i].name, name),
+                            span,
+                        )
+                    }
+                }
+            }
+        }
+        let mut ptys = Vec::new();
+        let mut cargs: Vec<E> = Vec::new();
+        for (i, slot) in slots.into_iter().enumerate() {
+            let a = slot.unwrap();
+            let p = &decl.params[i];
+            let pt = match &p.ty {
+                Some(t) => self.resolve_type(t, decl.span)?,
+                None => {
+                    if a.ty == Ty::Null {
+                        return err(
+                            format!("cannot infer the type of parameter '{}' from null; annotate it", p.name),
+                            span,
+                        );
+                    }
+                    a.ty
+                }
+            };
+            let Some(c) = self.coerce(a.c, a.ty, pt) else {
+                return err(
+                    format!(
+                        "argument '{}' of '{}' expects {}, got {}",
+                        p.name,
+                        name,
+                        pt.name(),
+                        a.ty.name()
+                    ),
+                    span,
+                );
+            };
+            ptys.push(pt);
+            cargs.push(E::new(c, pt, a.pure));
+        }
+        let (cname, ret) = self.instance(decl, ptys, span)?;
+        let impure = written.iter().filter(|&&i| !cargs[i].pure).count();
+        let text = if impure >= 2 {
+            // Preserve source-order evaluation of arguments.
+            let k = self.fresh();
+            let mut s = String::from("({ ");
+            for &i in &written {
+                s.push_str(&format!("{} a{}_{} = {}; ", cargs[i].ty.c(), k, i, cargs[i].c));
+            }
+            let names: Vec<String> = (0..n).map(|i| format!("a{}_{}", k, i)).collect();
+            // Defaulted params were not written; inline them.
+            let mut final_args = Vec::new();
+            for i in 0..n {
+                if written.contains(&i) {
+                    final_args.push(names[i].clone());
+                } else {
+                    final_args.push(cargs[i].c.clone());
+                }
+            }
+            s.push_str(&format!("{}({}); }})", cname, final_args.join(", ")));
+            s
+        } else {
+            format!(
+                "{}({})",
+                cname,
+                cargs.iter().map(|a| a.c.clone()).collect::<Vec<_>>().join(", ")
+            )
+        };
+        Ok(E::new(text, ret, false))
+    }
+
+    fn builtin(&mut self, name: &str, args: &[Arg], span: Span) -> R<E> {
+        if args.iter().any(|a| a.name.is_some()) {
+            return err(format!("'{}' does not accept named arguments", name), span);
+        }
+        match name {
+            "print" => {
+                let mut s = String::from("({ ");
+                for (i, a) in args.iter().enumerate() {
+                    let v = self.val(&a.value)?;
+                    if i > 0 {
+                        s.push_str("sn_print_space(); ");
+                    }
+                    let f = match v.ty {
+                        Ty::Int => "sn_print_int",
+                        Ty::Float => "sn_print_float",
+                        Ty::Bool => "sn_print_bool",
+                        Ty::Str => "sn_print_str",
+                        _ => "sn_print_null",
+                    };
+                    s.push_str(&format!("{}({}); ", f, v.c));
+                }
+                s.push_str("sn_print_nl(); })");
+                Ok(E::new(s, Ty::Void, false))
+            }
+            "str" | "int" | "float" => {
+                if args.len() != 1 {
+                    return err(format!("'{}' takes exactly one argument", name), span);
+                }
+                let v = self.val(&args[0].value)?;
+                let loc = self.loc(span);
+                let (c, ty) = match (name, v.ty) {
+                    ("str", Ty::Str) => (v.c, Ty::Str),
+                    ("str", Ty::Int) => (format!("sn_int_to_str({})", v.c), Ty::Str),
+                    ("str", Ty::Float) => (format!("sn_float_to_str({})", v.c), Ty::Str),
+                    ("str", Ty::Bool) => (format!("sn_bool_to_str({})", v.c), Ty::Str),
+                    ("str", Ty::Null) => (format!("sn_null_to_str({})", v.c), Ty::Str),
+                    ("int", Ty::Int) => (v.c, Ty::Int),
+                    ("int", Ty::Float) => (format!("sn_f2i({}, {})", v.c, loc), Ty::Int),
+                    ("int", Ty::Str) => (format!("sn_str_to_int({}, {})", v.c, loc), Ty::Int),
+                    ("int", Ty::Bool) => (format!("((int64_t)({}))", v.c), Ty::Int),
+                    ("float", Ty::Float) => (v.c, Ty::Float),
+                    ("float", Ty::Int) => (format!("((double)({}))", v.c), Ty::Float),
+                    ("float", Ty::Str) => (format!("sn_str_to_float({}, {})", v.c, loc), Ty::Float),
+                    _ => {
+                        return err(
+                            format!("cannot convert {} with {}()", v.ty.name(), name),
+                            span,
+                        )
+                    }
+                };
+                Ok(E::new(c, ty, v.pure))
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    // ---------------- expressions ----------------
+
+    fn expr(&mut self, e: &Expr) -> R<E> {
+        match &e.kind {
+            ExprKind::Int(n) => Ok(E::new(format!("INT64_C({})", n), Ty::Int, true)),
+            ExprKind::Float(f) => Ok(E::new(fmt_float(*f), Ty::Float, true)),
+            ExprKind::Str(s) => {
+                let c = self.str_lit(s);
+                Ok(E::new(c, Ty::Str, true))
+            }
+            ExprKind::Bool(b) => Ok(E::new(if *b { "true" } else { "false" }, Ty::Bool, true)),
+            ExprKind::Null => Ok(E::new("0", Ty::Null, true)),
+            ExprKind::Ident(name) => {
+                let v = self.lookup(name, e.span)?;
+                Ok(E::new(v.cname, v.ty, true))
+            }
+            ExprKind::FStr(parts) => self.fstr(parts),
+            ExprKind::Unary(op, x) => {
+                let v = self.val(x)?;
+                match (op, v.ty) {
+                    (UnOp::Neg, Ty::Int) | (UnOp::Neg, Ty::Float) => {
+                        Ok(E::new(format!("(-({}))", v.c), v.ty, v.pure))
+                    }
+                    (UnOp::Not, Ty::Bool) => Ok(E::new(format!("(!({}))", v.c), Ty::Bool, v.pure)),
+                    (UnOp::Neg, t) => err(format!("cannot negate {}", t.name()), e.span),
+                    (UnOp::Not, t) => err(
+                        format!("'not' needs a Bool, got {} (conditions must be Bool)", t.name()),
+                        e.span,
+                    ),
+                }
+            }
+            ExprKind::Binary(op, l, r) => {
+                let l = self.val(l)?;
+                let r = self.val(r)?;
+                self.binary(*op, l, r, e.span)
+            }
+            ExprKind::Call(callee, args) => self.call(callee, args, e.span),
+            ExprKind::Await(_) => nyi("await", e.span),
+            ExprKind::List(_) => nyi("lists", e.span),
+            ExprKind::Dict(_) => nyi("dictionaries", e.span),
+            ExprKind::Tuple(_) => nyi("tuples", e.span),
+            ExprKind::Index(..) => nyi("indexing", e.span),
+            ExprKind::Member(..) => nyi("member access", e.span),
+            ExprKind::Range { .. } => nyi("range values (ranges are only usable in 'for' for now)", e.span),
+            ExprKind::Predicate(..) => err(
+                "comparison predicates like '< 4' are only valid as call arguments",
+                e.span,
+            ),
+        }
+    }
+
+    fn fstr(&mut self, parts: &[FStrPart]) -> R<E> {
+        let n = self.fresh();
+        let b = format!("b{}", n);
+        let mut s = format!("({{ SnBuf {}; sn_buf_init(&{}); ", b, b);
+        let mut pure = true;
+        for p in parts {
+            match p {
+                FStrPart::Text(t) => {
+                    s.push_str(&format!(
+                        "sn_buf_text(&{}, \"{}\", {}); ",
+                        b,
+                        c_escape(t),
+                        t.len()
+                    ));
+                }
+                FStrPart::Expr(x) => {
+                    let v = self.val(x)?;
+                    pure &= v.pure;
+                    let f = match v.ty {
+                        Ty::Int => "sn_buf_int",
+                        Ty::Float => "sn_buf_float",
+                        Ty::Bool => "sn_buf_bool",
+                        Ty::Str => "sn_buf_str",
+                        _ => "sn_buf_null",
+                    };
+                    s.push_str(&format!("{}(&{}, {}); ", f, b, v.c));
+                }
+            }
+        }
+        s.push_str(&format!("sn_buf_finish(&{}); }})", b));
+        Ok(E::new(s, Ty::Str, pure))
+    }
+
+    fn binary(&mut self, op: BinOp, l: E, r: E, span: Span) -> R<E> {
+        use BinOp::*;
+        let pure = l.pure && r.pure;
+        let loc = self.loc(span);
+        let (lt, rt) = (l.ty, r.ty);
+        let bad = |lt: Ty, rt: Ty| -> R<E> {
+            err(
+                format!(
+                    "operator '{}' cannot be applied to {} and {}",
+                    op_sym(op),
+                    lt.name(),
+                    rt.name()
+                ),
+                span,
+            )
+        };
+        match op {
+            And | Or => {
+                if lt != Ty::Bool || rt != Ty::Bool {
+                    return err(
+                        format!(
+                            "'{}' needs Bool operands, got {} and {} (conditions must be Bool)",
+                            op_sym(op),
+                            lt.name(),
+                            rt.name()
+                        ),
+                        span,
+                    );
+                }
+                let sym = if op == And { "&&" } else { "||" };
+                Ok(E::new(format!("({} {} {})", l.c, sym, r.c), Ty::Bool, pure))
+            }
+            Eq | Ne | Lt | Le | Gt | Ge => {
+                let sym = op_sym(op);
+                let c = if lt.is_num() && rt.is_num() {
+                    if lt == Ty::Int && rt == Ty::Int {
+                        self.seq2(&l, &r, |a, b| format!("({} {} {})", a, sym, b))
+                    } else {
+                        self.seq2(&l, &r, move |a, b| {
+                            format!("({} {} {})", to_f(a, lt), sym, to_f(b, rt))
+                        })
+                    }
+                } else if lt == Ty::Str && rt == Ty::Str {
+                    match op {
+                        Eq => self.seq2(&l, &r, |a, b| format!("sn_str_eq({}, {})", a, b)),
+                        Ne => self.seq2(&l, &r, |a, b| format!("(!sn_str_eq({}, {}))", a, b)),
+                        _ => self.seq2(&l, &r, move |a, b| {
+                            format!("(sn_str_cmp({}, {}) {} 0)", a, b, sym)
+                        }),
+                    }
+                } else if lt == Ty::Bool && rt == Ty::Bool && matches!(op, Eq | Ne) {
+                    self.seq2(&l, &r, |a, b| format!("({} {} {})", a, sym, b))
+                } else if lt == Ty::Null && rt == Ty::Null && matches!(op, Eq | Ne) {
+                    (if op == Eq { "true" } else { "false" }).to_string()
+                } else {
+                    return err(
+                        format!("cannot compare {} with {} using '{}'", lt.name(), rt.name(), sym),
+                        span,
+                    );
+                };
+                Ok(E::new(c, Ty::Bool, pure))
+            }
+            Add if lt == Ty::Str && rt == Ty::Str => {
+                let c = self.seq2(&l, &r, |a, b| format!("sn_str_concat({}, {})", a, b));
+                Ok(E::new(c, Ty::Str, pure))
+            }
+            Add | Sub | Mul if lt.is_num() && rt.is_num() => {
+                let sym = op_sym(op);
+                if lt == Ty::Int && rt == Ty::Int {
+                    let c = self.seq2(&l, &r, |a, b| format!("({} {} {})", a, sym, b));
+                    Ok(E::new(c, Ty::Int, pure))
+                } else {
+                    let c = self.seq2(&l, &r, move |a, b| {
+                        format!("({} {} {})", to_f(a, lt), sym, to_f(b, rt))
+                    });
+                    Ok(E::new(c, Ty::Float, pure))
+                }
+            }
+            Div if lt.is_num() && rt.is_num() => {
+                let c = self.seq2(&l, &r, move |a, b| {
+                    format!("sn_fdiv({}, {}, {})", to_f(a, lt), to_f(b, rt), loc)
+                });
+                Ok(E::new(c, Ty::Float, pure))
+            }
+            FloorDiv if lt.is_num() && rt.is_num() => {
+                if lt == Ty::Int && rt == Ty::Int {
+                    let c = self.seq2(&l, &r, move |a, b| format!("sn_idiv({}, {}, {})", a, b, loc));
+                    Ok(E::new(c, Ty::Int, pure))
+                } else {
+                    let c = self.seq2(&l, &r, move |a, b| {
+                        format!("sn_ffloordiv({}, {}, {})", to_f(a, lt), to_f(b, rt), loc)
+                    });
+                    Ok(E::new(c, Ty::Float, pure))
+                }
+            }
+            Mod if lt.is_num() && rt.is_num() => {
+                if lt == Ty::Int && rt == Ty::Int {
+                    let c = self.seq2(&l, &r, move |a, b| format!("sn_imod({}, {}, {})", a, b, loc));
+                    Ok(E::new(c, Ty::Int, pure))
+                } else {
+                    let c = self.seq2(&l, &r, move |a, b| {
+                        format!("sn_fmod({}, {}, {})", to_f(a, lt), to_f(b, rt), loc)
+                    });
+                    Ok(E::new(c, Ty::Float, pure))
+                }
+            }
+            Pow if lt.is_num() && rt.is_num() => {
+                if lt == Ty::Int && rt == Ty::Int {
+                    let c = self.seq2(&l, &r, move |a, b| format!("sn_ipow({}, {}, {})", a, b, loc));
+                    Ok(E::new(c, Ty::Int, pure))
+                } else {
+                    let c = self.seq2(&l, &r, move |a, b| {
+                        format!("pow({}, {})", to_f(a, lt), to_f(b, rt))
+                    });
+                    Ok(E::new(c, Ty::Float, pure))
+                }
+            }
+            _ => bad(lt, rt),
+        }
+    }
+
+    // ---------------- statements ----------------
+
+    fn push_scope(&mut self) {
+        self.cx.scopes.push(HashMap::new());
+        self.cx.indent += 1;
+    }
+
+    fn pop_scope(&mut self) {
+        self.cx.scopes.pop();
+        self.cx.indent -= 1;
+    }
+
+    fn block(&mut self, body: &[Stmt]) -> R<()> {
+        self.push_scope();
+        for s in body {
+            self.stmt(s)?;
+        }
+        self.pop_scope();
+        Ok(())
+    }
+
+    fn cond(&mut self, e: &Expr) -> R<String> {
+        let v = self.val(e)?;
+        if v.ty != Ty::Bool {
+            return err(
+                format!("condition must be Bool, got {}", v.ty.name()),
+                e.span,
+            );
+        }
+        Ok(v.c)
+    }
+
+    fn stmt(&mut self, s: &Stmt) -> R<()> {
+        match &s.kind {
+            StmtKind::VarDecl { name, is_const, ty, init, .. } => {
+                let v = self.val(init)?;
+                let declared = match ty {
+                    Some(t) => Some(self.resolve_type(t, s.span)?),
+                    None => None,
+                };
+                let (c, t) = match declared {
+                    Some(t) => match self.coerce(v.c, v.ty, t) {
+                        Some(c) => (c, t),
+                        None => {
+                            return err(
+                                format!(
+                                    "cannot initialise '{}' of type {} with a value of type {}",
+                                    name,
+                                    t.name(),
+                                    v.ty.name()
+                                ),
+                                s.span,
+                            )
+                        }
+                    },
+                    None => {
+                        if v.ty == Ty::Null {
+                            return err(
+                                "cannot infer a type from null; add a type annotation",
+                                s.span,
+                            );
+                        }
+                        (v.c, v.ty)
+                    }
+                };
+                let is_global = !self.cx.in_fn && self.cx.scopes.len() == 1;
+                if is_global {
+                    if self.globals.contains_key(name) {
+                        return err(format!("'{}' is already declared", name), s.span);
+                    }
+                    let cname = format!("g_{}", name);
+                    self.global_decls.push_str(&format!("static {} {};\n", t.c(), cname));
+                    self.line(&format!("{} = {};", cname, c));
+                    self.globals
+                        .insert(name.clone(), Var { ty: t, is_const: *is_const, cname });
+                } else {
+                    if self.cx.scopes.last().unwrap().contains_key(name) {
+                        return err(format!("'{}' is already declared in this scope", name), s.span);
+                    }
+                    let cname = format!("v_{}_{}", name, self.fresh());
+                    self.line(&format!("{} {} = {};", t.c(), cname, c));
+                    self.cx
+                        .scopes
+                        .last_mut()
+                        .unwrap()
+                        .insert(name.clone(), Var { ty: t, is_const: *is_const, cname });
+                }
+                Ok(())
+            }
+            StmtKind::Assign { target, op, value } => {
+                let ExprKind::Ident(name) = &target.kind else {
+                    return nyi("assignment to indexes and members", s.span);
+                };
+                let var = self.lookup(name, target.span)?;
+                if var.is_const {
+                    return err(format!("cannot assign to constant '{}'", name), s.span);
+                }
+                let v = match op {
+                    None => self.val(value)?,
+                    Some(bop) => {
+                        let cur = E::new(var.cname.clone(), var.ty, true);
+                        let rhs = self.val(value)?;
+                        self.binary(*bop, cur, rhs, s.span)?
+                    }
+                };
+                let Some(c) = self.coerce(v.c, v.ty, var.ty) else {
+                    let hint = if op == &Some(BinOp::Div) && var.ty == Ty::Int {
+                        " ('/' always produces Float; use '//' for integer division)"
+                    } else {
+                        ""
+                    };
+                    return err(
+                        format!(
+                            "cannot assign {} to '{}' which has type {}{}",
+                            v.ty.name(),
+                            name,
+                            var.ty.name(),
+                            hint
+                        ),
+                        s.span,
+                    );
+                };
+                self.line(&format!("{} = {};", var.cname, c));
+                Ok(())
+            }
+            StmtKind::Expr(e) => {
+                let v = self.expr(e)?;
+                if v.ty == Ty::Void {
+                    self.line(&format!("{};", v.c));
+                } else {
+                    self.line(&format!("(void)({});", v.c));
+                }
+                Ok(())
+            }
+            StmtKind::If { branches, else_body } => {
+                for (i, (c, body)) in branches.iter().enumerate() {
+                    let cc = self.cond(c)?;
+                    if i == 0 {
+                        self.line(&format!("if ({}) {{", cc));
+                    } else {
+                        self.line(&format!("}} else if ({}) {{", cc));
+                    }
+                    self.block(body)?;
+                }
+                if let Some(e) = else_body {
+                    self.line("} else {");
+                    self.block(e)?;
+                }
+                self.line("}");
+                Ok(())
+            }
+            StmtKind::While { cond, body } => {
+                let cc = self.cond(cond)?;
+                self.line(&format!("while ({}) {{", cc));
+                self.cx.loop_depth += 1;
+                self.block(body)?;
+                self.cx.loop_depth -= 1;
+                self.line("}");
+                Ok(())
+            }
+            StmtKind::For { var, iter, body } => {
+                let ExprKind::Range { start, end, inclusive } = &iter.kind else {
+                    return nyi("iterating over anything but ranges", iter.span);
+                };
+                let a = self.val(start)?;
+                let b = self.val(end)?;
+                if a.ty != Ty::Int || b.ty != Ty::Int {
+                    return err(
+                        format!(
+                            "range bounds must be Int, got {} and {}",
+                            a.ty.name(),
+                            b.ty.name()
+                        ),
+                        iter.span,
+                    );
+                }
+                let n = self.fresh();
+                let cname = format!("v_{}_{}", var, n);
+                self.line("{");
+                self.cx.indent += 1;
+                self.line(&format!("int64_t e{} = {};", n, b.c));
+                let cmp = if *inclusive { "<=" } else { "<" };
+                self.line(&format!(
+                    "for (int64_t {} = {}; {} {} e{}; {}++) {{",
+                    cname, a.c, cname, cmp, n, cname
+                ));
+                self.push_scope();
+                self.cx.scopes.last_mut().unwrap().insert(
+                    var.clone(),
+                    Var { ty: Ty::Int, is_const: true, cname },
+                );
+                self.cx.loop_depth += 1;
+                for st in body {
+                    self.stmt(st)?;
+                }
+                self.cx.loop_depth -= 1;
+                self.pop_scope();
+                self.line("}");
+                self.cx.indent -= 1;
+                self.line("}");
+                Ok(())
+            }
+            StmtKind::Match { subject, cases, default } => {
+                let sv = self.val(subject)?;
+                let n = self.fresh();
+                self.line("{");
+                self.cx.indent += 1;
+                self.line(&format!("{} m{} = {};", sv.ty.c(), n, sv.c));
+                let mut first = true;
+                for (pat, body) in cases {
+                    let pv = self.pattern(pat)?;
+                    let subj = E::new(format!("m{}", n), sv.ty, true);
+                    let test = self.binary(BinOp::Eq, subj, pv, pat.span)?;
+                    if first {
+                        self.line(&format!("if ({}) {{", test.c));
+                    } else {
+                        self.line(&format!("}} else if ({}) {{", test.c));
+                    }
+                    first = false;
+                    self.block(body)?;
+                }
+                if let Some(d) = default {
+                    if first {
+                        self.line("{");
+                    } else {
+                        self.line("} else {");
+                    }
+                    self.block(d)?;
+                    first = false;
+                }
+                if !first {
+                    self.line("}");
+                }
+                self.cx.indent -= 1;
+                self.line("}");
+                Ok(())
+            }
+            StmtKind::Return(v) => {
+                if !self.cx.in_fn {
+                    return err("'return' outside of a function", s.span);
+                }
+                match v {
+                    None => {
+                        if matches!(self.cx.ret_decl, Some(t) if t != Ty::Void) {
+                            return err("this function must return a value", s.span);
+                        }
+                        self.cx.rets.push(Ty::Void);
+                        self.line("return;");
+                    }
+                    Some(e) => {
+                        let v = self.val(e)?;
+                        let c = match self.cx.ret_decl {
+                            Some(t) => match self.coerce(v.c, v.ty, t) {
+                                Some(c) => c,
+                                None => {
+                                    return err(
+                                        format!(
+                                            "returning {} from a function declared to return {}",
+                                            v.ty.name(),
+                                            t.name()
+                                        ),
+                                        s.span,
+                                    )
+                                }
+                            },
+                            None => v.c,
+                        };
+                        self.cx.rets.push(v.ty);
+                        self.line(&format!("return {};", c));
+                    }
+                }
+                Ok(())
+            }
+            StmtKind::Break => {
+                if self.cx.loop_depth == 0 {
+                    return err("'break' outside of a loop", s.span);
+                }
+                self.line("break;");
+                Ok(())
+            }
+            StmtKind::Continue => {
+                if self.cx.loop_depth == 0 {
+                    return err("'continue' outside of a loop", s.span);
+                }
+                self.line("continue;");
+                Ok(())
+            }
+            StmtKind::Pass => Ok(()),
+            StmtKind::Fn(f) => err(
+                format!(
+                    "nested function declarations are not supported in V1 (declare '{}' at module level)",
+                    f.name
+                ),
+                f.span,
+            ),
+            StmtKind::Class(_) => nyi("classes", s.span),
+            StmtKind::Try { .. } => nyi("try/catch/finally", s.span),
+            StmtKind::Throw(_) => nyi("throw", s.span),
+            StmtKind::Use { .. } => nyi("modules ('use')", s.span),
+            StmtKind::Manages(_) => nyi("'manages'", s.span),
+        }
+    }
+
+    fn pattern(&mut self, e: &Expr) -> R<E> {
+        match &e.kind {
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Null => self.val(e),
+            ExprKind::Unary(UnOp::Neg, x) if matches!(x.kind, ExprKind::Int(_) | ExprKind::Float(_)) => {
+                self.val(e)
+            }
+            _ => err("'case' patterns must be literal values in V1", e.span),
+        }
+    }
+}

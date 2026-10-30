@@ -2,8 +2,8 @@
 
 - [x] 1. Architecture document
 - [x] 2. Lexer and parser (full V1 surface syntax)
-- [ ] 3. Type checker: variables, expressions, inference
-- [ ] 4. C emitter + runtime: control flow, functions
+- [x] 3. Type checker: variables, expressions, inference
+- [x] 4. C emitter + runtime: control flow, functions, strings
 - [ ] 5. Classes and inheritance
 - [ ] 6. Collections (typed lists, dicts, filter predicates)
 - [ ] 7. Modules and `private`
