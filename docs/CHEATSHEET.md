@@ -162,7 +162,6 @@ Compile errors show `file:line:col`, the source line and a caret. Runtime errors
 zero, empty `min()`, mismatched list lengths, bad `int("x")`, stack overflow, out of memory).
 
 ## Not implemented yet
-`async`/`await`,
 optional types (`T?`), functions as values (other than `filter(name)`), string indexing and
 length, `for` over anything but ranges, lists and dictionaries. These parse but give a clear
 "not implemented yet" error. Lambdas and enums are deliberately not in V1.

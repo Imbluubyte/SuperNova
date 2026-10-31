@@ -102,9 +102,6 @@ impl<'a> Gen<'a> {
             }
             let mut methods: HashMap<String, &'a FnDecl> = HashMap::new();
             for m in &c.methods {
-                if m.is_async {
-                    return nyi("async methods", m.span);
-                }
                 if matches!(m.name.as_str(), "self" | "super") {
                     return err(format!("'{}' is a reserved name", m.name), m.span);
                 }
@@ -434,12 +431,21 @@ impl<'a> Gen<'a> {
             None => None,
         };
         let cname = format!("m{}_{}_{}", self.minsts.len(), cls_name, decl.name);
+        if decl.is_async {
+            if decl.name == "onCreation" {
+                return err("onCreation cannot be async", decl.span);
+            }
+            self.uses_async = true;
+        }
+        let body_name = if decl.is_async { format!("{}_body", cname) } else { cname.clone() };
+        let shown_ret = if decl.is_async { declared.map(Ty::task_of) } else { declared };
         self.minsts
-            .insert(key.clone(), Inst { cname: cname.clone(), ret: declared });
+            .insert(key.clone(), Inst { cname: cname.clone(), ret: shown_ret });
 
         let mut cx = Ctx::new(true);
         cx.ret_decl = declared;
         cx.volatile = super::assigned_in_try(&decl.body);
+        cx.is_async = decl.is_async;
         cx.cur_class = Some(owner);
         cx.fn_name = decl.name.clone();
         cx.scopes[0].insert(
@@ -469,11 +475,21 @@ impl<'a> Gen<'a> {
         if decl.name == "onCreation" && ret != Ty::Void {
             return err("onCreation cannot return a value", decl.span);
         }
-        self.minsts.get_mut(&key).unwrap().ret = Some(ret);
         let ret_c = self.cty(ret);
-        let sig = format!("static {} {}({})", ret_c, cname, params_c.join(", "));
+        let sig = format!("static {} {}({})", ret_c, body_name, params_c.join(", "));
         self.protos.push_str(&format!("{};\n", sig));
         self.bodies.push_str(&format!("{} {{\n{}}}\n\n", sig, fcx.out));
+        if decl.is_async {
+            let mut ptys_c = vec![format!("SnO_{}*", owner)];
+            for t in &ptys {
+                ptys_c.push(self.cty(*t));
+            }
+            self.async_wrapper(&cname, &body_name, ptys_c, ret);
+            let tt = Ty::task_of(ret);
+            self.minsts.get_mut(&key).unwrap().ret = Some(tt);
+            return Ok((cname, tt));
+        }
+        self.minsts.get_mut(&key).unwrap().ret = Some(ret);
         Ok((cname, ret))
     }
 

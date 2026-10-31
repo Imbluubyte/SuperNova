@@ -18,6 +18,7 @@ use std::process::{exit, Command};
 
 const RUNTIME_H: &str = include_str!("../../runtime/snrt.h");
 const GC_H: &str = include_str!("../../runtime/sngc.h");
+const ASYNC_H: &str = include_str!("../../runtime/snasync.h");
 
 fn usage() -> ! {
     eprintln!(
@@ -91,6 +92,14 @@ fn first_line(bytes: &[u8]) -> String {
 const DOCTOR_BASICS: (&str, &str) = (
     include_str!("../../tests/cases/basics.sn"),
     include_str!("../../tests/cases/basics.out"),
+);
+const DOCTOR_ERRORS: (&str, &str) = (
+    include_str!("../../tests/cases/errors.sn"),
+    include_str!("../../tests/cases/errors.out"),
+);
+const DOCTOR_ASYNC: (&str, &str) = (
+    include_str!("../../tests/cases/async_basic.sn"),
+    include_str!("../../tests/cases/async_basic.out"),
 );
 const DOCTOR_COLLECTIONS: (&str, &str) = (
     include_str!("../../tests/cases/collections.sn"),
@@ -169,7 +178,7 @@ fn doctor() {
         }
     };
 
-    for (name, (src, expect)) in [("basics", DOCTOR_BASICS), ("collections", DOCTOR_COLLECTIONS), ("gc_survival", DOCTOR_GC)] {
+    for (name, (src, expect)) in [("basics", DOCTOR_BASICS), ("collections", DOCTOR_COLLECTIONS), ("gc_survival", DOCTOR_GC), ("errors", DOCTOR_ERRORS), ("async", DOCTOR_ASYNC)] {
         let (ok, out, err, secs) = run(name, src, false, false);
         let good = ok && out == expect;
         let detail = if good { format!("compile + run {:.2}s", secs) } else {
@@ -230,6 +239,7 @@ fn build(path: &str, out: &Path) {
     let dir = scratch_dir();
     std::fs::write(dir.join("snrt.h"), RUNTIME_H).unwrap();
     std::fs::write(dir.join("sngc.h"), GC_H).unwrap();
+    std::fs::write(dir.join("snasync.h"), ASYNC_H).unwrap();
     let c_path = dir.join("program.c");
     std::fs::write(&c_path, format!("#define _GNU_SOURCE\n#include \"snrt.h\"\n{}", c)).unwrap();
     let cc = find_cc();

@@ -375,7 +375,7 @@ impl<'a> Rn<'a> {
     fn ty(&mut self, t: &mut TypeExpr, span: Span) -> R<()> {
         match t {
             TypeExpr::Named(n) => *n = resolve_type_name(self.infos, self.me, n, span)?,
-            TypeExpr::List(i) | TypeExpr::Optional(i) => self.ty(i, span)?,
+            TypeExpr::List(i) | TypeExpr::Optional(i) | TypeExpr::Task(i) => self.ty(i, span)?,
             TypeExpr::Dict(k, v) => {
                 self.ty(k, span)?;
                 self.ty(v, span)?;

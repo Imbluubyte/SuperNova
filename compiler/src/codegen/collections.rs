@@ -45,6 +45,7 @@ impl<'a> Gen<'a> {
             Ty::Void => "void".into(),
             Ty::Any => "SnVal".into(),
             Ty::Class(c) => format!("SnO_{}*", c),
+            Ty::Task(_) => "SnTask*".into(),
             Ty::List(_) | Ty::Dict(..) => format!("{}*", self.type_name(t)),
             Ty::Tuple(_) => self.type_name(t),
         }
@@ -876,6 +877,7 @@ impl<'a> Gen<'a> {
                     }
                 }
             }
+            Ty::Task(_) => format!("sn_buf_text(&{}, \"<Task>\", 6); ", b),
             Ty::Void => String::new(),
         }
     }

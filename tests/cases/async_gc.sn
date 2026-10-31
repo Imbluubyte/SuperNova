@@ -1,0 +1,55 @@
+# Data held only on a suspended task's stack must survive garbage collections.
+async fn worker(id: Int) -> Int:
+    var items = [id, id * 2, id * 3]
+    var label = f"worker-{id}"
+    var table = {label: items}
+    await sleep(0.001 * id)
+    gcCollect()
+    await sleep(0.001)
+    var sum = 0
+    for x in table[label]:
+        sum += x
+    return sum
+
+var jobs: List[Task[Int]] = []
+for i in 1..200:
+    jobs.add(worker(i))
+gcCollect()
+var total = 0
+for j in jobs:
+    total += await j
+print(total)
+
+# real background file I/O: write, read back, and a failure
+async fn roundTrip(path: String, text: String) -> String:
+    await writeFile(path, text)
+    return await readFile(path)
+
+var path = "async_gc_test_file.tmp"
+print(await roundTrip(path, "line one\nline two"))
+try:
+    var missing = await readFile("definitely/not/here.txt")
+    print(missing)
+catch e:
+    print("failed as expected")
+
+# sleeping tasks overlap instead of adding up
+async fn nap() -> Int:
+    await sleep(0.2)
+    return 1
+var start = gcHeapBytes()
+var naps: List[Task[Int]] = []
+for i in 1..100:
+    naps.add(nap())
+var done = 0
+for n in naps:
+    done += await n
+print("naps", done)
+
+# many short-lived tasks reuse stacks and are reclaimed
+async fn tiny(x: Int) -> Int:
+    return x + 1
+var acc = 0
+for i in 1..20000:
+    acc += await tiny(i)
+print(acc)

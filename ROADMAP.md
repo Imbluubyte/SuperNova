@@ -9,8 +9,8 @@
 - [x] 6b. Dictionaries
 - [x] 7. Modules and `private`
 - [x] 8a. Garbage collector, stack-overflow and out-of-memory handling (docs/MEMORY.md)
-- [ ] 8b. Errors (try/catch/finally)
-- [ ] 9. async/await
+- [x] 8b. Errors (try/catch/finally)
+- [x] 9. async/await (stackful coroutines, timers, background file I/O)
 - [ ] 10. Standard library
 - [ ] 11. Termux build and on-device testing
 - [ ] 12. Optimisation passes and benchmarks

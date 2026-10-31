@@ -229,3 +229,19 @@ fn module_errors_are_rejected_with_a_clear_error() {
     }
     assert!(n >= 10);
 }
+
+#[test]
+fn stack_overflow_inside_a_task_is_reported() {
+    let dir = std::env::temp_dir().join("snc-task-so-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("task_overflow.sn");
+    std::fs::write(
+        &f,
+        "fn deep(n: Int) -> Int:\n    var xs = [n]\n    return deep(n + 1) + xs[1]\n\nasync fn job() -> Int:\n    return deep(1)\n\nprint(\"before\")\nprint(await job())\n",
+    )
+    .unwrap();
+    let out = snc().arg("run").arg(&f).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "before\n");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("stack overflow"));
+}

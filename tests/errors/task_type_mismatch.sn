@@ -1,0 +1,3 @@
+async fn g() -> Int:
+    return 1
+var t: Task[String] = g()

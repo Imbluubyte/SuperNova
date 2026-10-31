@@ -1,0 +1,4 @@
+async fn g():
+    pass
+var x = await g()
+print(x)

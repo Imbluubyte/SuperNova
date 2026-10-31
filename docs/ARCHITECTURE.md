@@ -111,13 +111,27 @@ Implemented in `runtime/sngc.h`; full description in [MEMORY.md](MEMORY.md).
 
 ### 2.7 Async
 
-* Cooperative, single-threaded event loop with **stackless coroutines**:
-  each `async fn` is lowered to a state machine (like Rust/C#).
-  Awaiting suspends only that task; the loop keeps running other tasks.
-* Real background work (file IO, networking, heavy compute) is dispatched to a
-  small thread pool; completion re-enters the loop on the main thread. So
-  `await` never blocks the main thread, and game code has no data races.
-* Deferred to a later stage; see ROADMAP.
+Implemented in `runtime/snasync.h`; user-facing description in LANGUAGE.md.
+
+* Cooperative, single-threaded scheduler with **stackful coroutines**: every
+  `async fn` call creates a `Task` with its own small stack (256 KiB, lazily
+  committed `mmap`, guard page, pooled for reuse). Tasks switch only at `await`.
+* Why stackful rather than the stackless state machines proposed earlier? The
+  compiler emits C with statement expressions and a conservative GC; rewriting
+  every function body into a state machine would touch the whole code
+  generator, whereas a coroutine is a small runtime feature and `await` works
+  inside any expression, `try`/`finally`, loops and methods with no extra rules.
+  Cost: one stack per live task instead of one struct.
+* Context switch is ~20 lines of assembly (x86-64 and ARM64) because Android's
+  libc has no `ucontext`. The ARM64 version follows the standard AAPCS64
+  callee-saved set (x19-x30, d8-d15); `snc doctor` exercises it on-device.
+* Real non-blocking work: `sleep` is a timer in the event loop, and `readFile` /
+  `writeFile` run on detached worker threads (no GC access) that post results to
+  the loop. While they run, other tasks keep going.
+* `await` rethrows a failed task's error in the awaiter. Errors in tasks that
+  nobody awaits are reported (and fail the exit status) at program end.
+* Not implemented: a worker pool for user functions (needs first-class functions),
+  cancellation, timeouts.
 
 ### 2.8 Modules
 

@@ -1,0 +1,5 @@
+async fn bad():
+    throw "task exploded"
+
+var t = bad()
+print("main continues")

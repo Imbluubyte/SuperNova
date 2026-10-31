@@ -1,7 +1,7 @@
 # SuperNova language reference (implemented subset)
 
 Everything here is implemented and covered by tests in `tests/`. Syntax that
-parses but is not yet implemented (async,
+parses but is not yet implemented (optional types,
 first-class functions) is rejected with a "not implemented yet"
 compile error rather than silently misbehaving.
 
@@ -210,3 +210,28 @@ finally:
 - An uncaught error prints `Error: message` (or `RuntimeError: ...`) with its location and exits with status 1.
 - Not catchable: out of memory and stack overflow.
 - Implementation: `setjmp`/`longjmp` handler frames, so a `try` that never throws costs a few instructions. Locals assigned inside a `try` are declared `volatile` so their values are correct after an error.
+
+## Async / await
+
+```
+async fn fetchSquare(x: Int) -> Int:
+    await sleep(0.1)                   # does not block other tasks
+    return x * x
+
+async fn main2():
+    var a = fetchSquare(3)             # starts a task, returns a Task[Int]
+    var b = fetchSquare(4)             # both run concurrently
+    print(await a + await b)           # 25 after ~0.1 s, not 0.2 s
+
+await main2()                          # `await` is allowed at the top level of a file
+var text = await readFile("notes.txt")     # file I/O runs in the background
+```
+
+- Calling an `async fn` returns immediately with a `Task[T]` (`T` = the declared or inferred return type; `Task[Void]`-style tasks give no value). The body runs when the program waits: at an `await`, or before the program exits.
+- `await task` suspends only the current task and yields its value. `await` works inside `async fn` bodies and at the top level of a file, but not in ordinary functions.
+- Errors thrown in a task are rethrown by `await`, so `try`/`catch` around `await` works. An error in a task that is never awaited is reported when the program ends and makes it exit with status 1.
+- Built-in awaitables: `sleep(seconds)`, `readFile(path)` (-> String), `writeFile(path, text)`. A failed file operation throws a message such as `cannot read 'x': No such file or directory`.
+- Methods may be `async` (not `onCreation`). Tasks are collected like any object; `Task[T]` can be used as a type, e.g. `List[Task[Int]]`.
+- Only one task runs at a time, so tasks never race on your data. A task that loops forever without awaiting blocks all others.
+- Each task has a 256 KiB stack (override with env `SN_TASK_STACK_KB`), so very deep recursion inside a task reports "stack overflow" sooner than on the main stack.
+- Supported on x86-64 and ARM64.

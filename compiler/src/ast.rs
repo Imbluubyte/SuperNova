@@ -10,6 +10,8 @@ pub enum TypeExpr {
     List(Box<TypeExpr>),
     /// `Dict[K, V]`
     Dict(Box<TypeExpr>, Box<TypeExpr>),
+    /// `Task[T]`: the handle returned by calling an `async fn`.
+    Task(Box<TypeExpr>),
     /// `Tuple[A, B]`
     Tuple(Vec<TypeExpr>),
     /// `T?`

@@ -6,8 +6,8 @@ native code (via C and clang) and is designed to build and run on Android/Termux
 **Status: early development.** SuperNova programs using variables, numbers,
 strings, f-strings, lists (1-based, elementwise arithmetic, `filter`), tuples, control flow (`if/orif/else`, `while`, `for` over ranges,
 `match`), and functions (generic, recursive, default and named arguments) compile
-to native executables today. Errors (try/catch) and async are
-parsed or planned but not implemented yet. Memory is managed by a built-in garbage collector ([docs/MEMORY.md](docs/MEMORY.md)); see [ROADMAP.md](ROADMAP.md).
+to native executables today. Optional types and first-class
+functions are planned but not implemented yet. Memory is managed by a built-in garbage collector ([docs/MEMORY.md](docs/MEMORY.md)); see [ROADMAP.md](ROADMAP.md).
 
 * [Language reference](docs/LANGUAGE.md) (implemented subset)
 * [Architecture and design decisions](docs/ARCHITECTURE.md)

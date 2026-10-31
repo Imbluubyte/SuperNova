@@ -64,8 +64,10 @@ Environment variables (for debugging and tuning, no recompile needed):
 ## Rules and limits
 
 * The collector is **single-threaded**: only the main thread may touch heap objects.
-  The async design (docs/ARCHITECTURE.md) keeps worker threads away from the heap and
-  hands results back to the main thread.
+  Async tasks all run on the main thread (one at a time); file operations run on worker
+  threads that never touch the heap and hand results back to the main thread. Each
+  task has its own stack: suspended task stacks are scanned as roots, from their saved
+  stack pointer to the top (see `runtime/snasync.h`).
 * Conservative scanning can occasionally keep an object alive because an unrelated
   integer looks like its address (false retention). It never frees live data. Atomic
   storage is immune, so big numeric arrays are unaffected.

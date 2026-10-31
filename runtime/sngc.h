@@ -83,6 +83,7 @@ static struct {
     size_t peak_bytes;
     uintptr_t stack_base;
     size_t stack_limit;
+    uintptr_t co_lo;    /* low end of the running coroutine's stack (0 on the main stack) */
     SnGcRoot *roots;
     size_t nroots, croots;
     SnGcWork *work;
@@ -398,11 +399,16 @@ static void sngc_sweep(void) {
 
 /* ---------- collection ---------- */
 
+/* Optional hook for extra roots (suspended coroutine stacks); see snasync.h.
+ * It calls sngc_scan() on each range and sngc_drain() when done. */
+static void (*sn_gc_extra)(void);
+
 __attribute__((noinline)) static void sngc_mark_all(void *regs) {
     (void)regs;
     for (size_t i = 0; i < sn_gc.nroots; i++)
         sngc_scan(sn_gc.roots[i].p, (const char *)sn_gc.roots[i].p + sn_gc.roots[i].n);
     sngc_drain();
+    if (sn_gc_extra) { sn_gc_extra(); sngc_drain(); }
     sngc_scan_stack();
 }
 
@@ -458,7 +464,8 @@ static void sngc_segv_handler(int sig, siginfo_t *si, void *ctx) {
     (void)ctx;
     uintptr_t a = (uintptr_t)si->si_addr;
     const char *msg;
-    if (a < sn_gc.stack_base + 65536 && a + sn_gc.stack_limit + 524288 > sn_gc.stack_base)
+    if ((a < sn_gc.stack_base + 65536 && a + sn_gc.stack_limit + 524288 > sn_gc.stack_base) ||
+        (sn_gc.co_lo && a + 65536 > sn_gc.co_lo && a < sn_gc.co_lo + 65536))
         msg = "RuntimeError: stack overflow (infinite or very deep recursion?)\n";
     else
         msg = "FatalError: invalid memory access. This is a bug in SuperNova; please report it.\n";
