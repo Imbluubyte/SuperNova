@@ -1,0 +1,7 @@
+fn f() -> Int:
+    try:
+        return 1
+    catch e:
+        print(e)
+
+print(f())

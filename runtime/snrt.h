@@ -15,10 +15,12 @@
 #include <inttypes.h>
 #include <math.h>
 #include <errno.h>
+#include <setjmp.h>
 
 #define SN_COLD __attribute__((cold, noreturn))
 
-SN_COLD static void sn_panic(const char *loc, const char *fmt, ...) {
+/* Fatal errors cannot be caught by try/catch (out of memory, internal failures). */
+SN_COLD static void sn_fatal(const char *loc, const char *fmt, ...) {
     fflush(stdout);
     va_list ap;
     va_start(ap, fmt);
@@ -35,7 +37,7 @@ SN_COLD static void sn_panic(const char *loc, const char *fmt, ...) {
  * garbage-collected heap (e.g. string builders). */
 static inline void *sn_xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
-    if (!p) sn_panic("<runtime>", "out of memory");
+    if (!p) sn_fatal("<runtime>", "out of memory");
     return p;
 }
 
@@ -52,6 +54,50 @@ static inline SnStr *sn_str_new(const char *s, int64_t len) {
     memcpy(r->data, s, (size_t)len);
     r->data[len] = 0;
     return r;
+}
+
+/* ---------- errors: try / catch / throw ---------- */
+
+/* Handlers form a stack of setjmp frames. A throw pops the innermost frame and
+ * jumps to it. Each async task has its own stack of handlers. */
+typedef struct SnTry { jmp_buf jb; struct SnTry *prev; } SnTry;
+static SnTry *sn_try_top;
+static SnStr *sn_exc;           /* message of the error being thrown (a GC root) */
+static const char *sn_exc_loc;  /* where it was thrown */
+static int sn_exc_kind;         /* 0 = `throw`, 1 = runtime error */
+
+SN_COLD static void sn_throw_str(const char *loc, SnStr *msg, int kind) {
+    if (!sn_try_top) {
+        fflush(stdout);
+        fprintf(stderr, "%s: %s\n  at %s\n", kind ? "RuntimeError" : "Error", msg->data, loc);
+        exit(1);
+    }
+    sn_exc = msg;
+    sn_exc_loc = loc;
+    sn_exc_kind = kind;
+    SnTry *t = sn_try_top;
+    sn_try_top = t->prev;
+    longjmp(t->jb, 1);
+}
+
+/* A runtime error (bad index, division by zero, ...). Catchable. */
+SN_COLD static void sn_panic(const char *loc, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    if (!sn_try_top) {
+        fflush(stdout);
+        fprintf(stderr, "RuntimeError: ");
+        vfprintf(stderr, fmt, ap);
+        fprintf(stderr, "\n  at %s\n", loc);
+        va_end(ap);
+        exit(1);
+    }
+    char buf[1024];
+    int n = vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    if (n < 0) n = 0;
+    if (n >= (int)sizeof buf) n = (int)sizeof buf - 1;
+    sn_throw_str(loc, sn_str_new(buf, n), 1);
 }
 
 static inline SnStr *sn_str_concat(SnStr *a, SnStr *b) {
@@ -91,7 +137,7 @@ static inline void sn_buf_text(SnBuf *b, const char *s, int64_t n) {
     if (b->len + n > b->cap) {
         while (b->len + n > b->cap) b->cap *= 2;
         b->p = (char *)realloc(b->p, (size_t)b->cap);
-        if (!b->p) sn_panic("<runtime>", "out of memory");
+        if (!b->p) sn_fatal("<runtime>", "out of memory");
     }
     memcpy(b->p + b->len, s, (size_t)n);
     b->len += n;

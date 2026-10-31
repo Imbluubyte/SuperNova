@@ -1,7 +1,7 @@
 # SuperNova language reference (implemented subset)
 
 Everything here is implemented and covered by tests in `tests/`. Syntax that
-parses but is not yet implemented (try/catch, async,
+parses but is not yet implemented (async,
 first-class functions) is rejected with a "not implemented yet"
 compile error rather than silently misbehaving.
 
@@ -188,3 +188,25 @@ var s: sh.Shape = c            # ...including in type annotations and `extends s
 - Circular imports, unknown modules/members and a module name that clashes with a top-level name are compile errors. Errors point at the right file and line.
 - A local variable or parameter named like a module shadows it.
 - `use` must be at the top level of a file.
+
+## Errors: try / catch / finally / throw
+
+```
+fn withdraw(balance: Int, n: Int) -> Int:
+    if n > balance:
+        throw f"insufficient funds: {balance} < {n}"
+    return balance - n
+
+try:
+    print(withdraw(10, 40))
+catch e:                       # e is a String
+    print("failed:", e)
+finally:
+    print("always runs")       # also on return, break and continue
+```
+
+- `throw` takes a `String` message (use `str(x)` for other values). Runtime errors (bad index, missing dictionary key, division by zero, failed `int("abc")`, ...) are caught the same way; `e` is the message without the source location.
+- `try` needs a `catch`, a `finally`, or both. Errors thrown inside `catch` or `finally` propagate outward; `finally` runs first.
+- An uncaught error prints `Error: message` (or `RuntimeError: ...`) with its location and exits with status 1.
+- Not catchable: out of memory and stack overflow.
+- Implementation: `setjmp`/`longjmp` handler frames, so a `try` that never throws costs a few instructions. Locals assigned inside a `try` are declared `volatile` so their values are correct after an error.

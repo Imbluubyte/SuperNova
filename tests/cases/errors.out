@@ -1,0 +1,25 @@
+20
+caught: negative input
+caught: division by zero
+caught: list index 7 is out of range (length 3; indexes start at 1)
+caught: key "zz" is not in the dictionary
+caught: cannot convert "abc" to Int
+145
+body done
+finally 0
+normal
+finally 1
+early return
+catch boom
+finally 2
+from catch
+cleanup
+outer caught inner
+handling first
+outer wrapped(first)
+5008
+level1 cleanup
+caught from level3: deep
+insufficient funds: 6 < 40 6
+2000
+done

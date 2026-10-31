@@ -21,7 +21,7 @@
  *   SN_GC_STATS=1    print collection count, pause times and peak heap at exit
  *   SN_GC_STRESS=N   collect before every Nth allocation (1 = every allocation)
  *
- * Requires sn_panic() from snrt.h and a POSIX system (Linux, Android/Bionic).
+ * Requires sn_fatal() from snrt.h and a POSIX system (Linux, Android/Bionic).
  */
 #ifndef SNGC_H
 #define SNGC_H
@@ -123,7 +123,7 @@ static void sngc_add_span(SnSpan *s) {
     if (sn_gc.nspans == sn_gc.cspans) {
         size_t nc = sn_gc.cspans ? sn_gc.cspans * 2 : 256;
         SnSpanRef *n = (SnSpanRef *)realloc(sn_gc.spans, nc * sizeof(SnSpanRef));
-        if (!n) sn_panic("<runtime>", "out of memory");
+        if (!n) sn_fatal("<runtime>", "out of memory");
         sn_gc.spans = n;
         sn_gc.cspans = nc;
     }
@@ -227,7 +227,7 @@ static void *sngc_try_alloc(size_t n, int atomic, size_t *charged) {
  * Non-atomic objects are returned zeroed. */
 static void *sn_gc_alloc(size_t n, int atomic) {
     if (n == 0) n = 1;
-    if (n > SNGC_MAX_ALLOC) sn_panic("<runtime>", "allocation of %zu bytes is too large", n);
+    if (n > SNGC_MAX_ALLOC) sn_fatal("<runtime>", "allocation of %zu bytes is too large", n);
     if (sn_gc.since >= sn_gc.threshold) sn_gc_collect();
     if (sn_gc.stress && ++sn_gc.stress_ctr >= sn_gc.stress) {
         sn_gc.stress_ctr = 0;
@@ -238,7 +238,7 @@ static void *sn_gc_alloc(size_t n, int atomic) {
     if (!p) {
         sn_gc_collect();
         p = sngc_try_alloc(n, atomic, &charged);
-        if (!p) sn_panic("<runtime>", "out of memory (could not allocate %zu bytes)", n);
+        if (!p) sn_fatal("<runtime>", "out of memory (could not allocate %zu bytes)", n);
     }
     sn_gc.since += charged;
     sn_gc.live_bytes += charged;
@@ -281,7 +281,7 @@ static void sngc_push_work(const char *p, size_t n) {
     if (sn_gc.nwork == sn_gc.cwork) {
         size_t nc = sn_gc.cwork ? sn_gc.cwork * 2 : 1024;
         SnGcWork *w = (SnGcWork *)realloc(sn_gc.work, nc * sizeof(SnGcWork));
-        if (!w) sn_panic("<runtime>", "out of memory while collecting garbage");
+        if (!w) sn_fatal("<runtime>", "out of memory while collecting garbage");
         sn_gc.work = w;
         sn_gc.cwork = nc;
     }
@@ -430,7 +430,7 @@ static void sn_gc_root(const void *p, size_t n) {
     if (sn_gc.nroots == sn_gc.croots) {
         size_t nc = sn_gc.croots ? sn_gc.croots * 2 : 64;
         SnGcRoot *r = (SnGcRoot *)realloc(sn_gc.roots, nc * sizeof(SnGcRoot));
-        if (!r) sn_panic("<runtime>", "out of memory");
+        if (!r) sn_fatal("<runtime>", "out of memory");
         sn_gc.roots = r;
         sn_gc.croots = nc;
     }

@@ -1,0 +1,138 @@
+fn risky(n: Int) -> Int:
+    if n < 0:
+        throw "negative input"
+    return 100 // n
+
+# catching a thrown error and runtime errors
+try:
+    print(risky(5))
+    print(risky(-1))
+    print("not reached")
+catch e:
+    print("caught:", e)
+
+try:
+    print(risky(0))
+catch e:
+    print("caught:", e)
+
+var xs = [1, 2, 3]
+try:
+    print(xs[7])
+catch e:
+    print("caught:", e)
+
+var d = {"a": 1}
+try:
+    print(d["zz"])
+catch e:
+    print("caught:", e)
+
+try:
+    print(int("abc"))
+catch e:
+    print("caught:", e)
+
+# variables modified inside try are visible after (volatile handling)
+var count = 0
+fn bump() -> Int:
+    var local = 0
+    for i in 1..5:
+        try:
+            local += 1
+            if i == 3:
+                throw "three"
+            local += 10
+        catch e:
+            local += 100
+    return local
+print(bump())
+
+# finally always runs
+fn withFinally(n: Int) -> String:
+    try:
+        if n == 1:
+            return "early return"
+        if n == 2:
+            throw "boom"
+        print("body done")
+    catch e:
+        print("catch", e)
+        return "from catch"
+    finally:
+        print("finally", n)
+    return "normal"
+print(withFinally(0))
+print(withFinally(1))
+print(withFinally(2))
+
+# finally without catch rethrows
+try:
+    try:
+        throw "inner"
+    finally:
+        print("cleanup")
+catch e:
+    print("outer caught", e)
+
+# nested handlers and rethrow from catch
+try:
+    try:
+        throw "first"
+    catch e:
+        print("handling", e)
+        throw f"wrapped({e})"
+catch e:
+    print("outer", e)
+
+# break and continue through finally
+var total = 0
+for i in 1..6:
+    try:
+        if i == 2:
+            continue
+        if i == 5:
+            break
+        total += i
+    finally:
+        total += 1000
+print(total)
+
+# errors propagate through function calls
+fn level3():
+    throw "deep"
+fn level2():
+    level3()
+fn level1():
+    try:
+        level2()
+    finally:
+        print("level1 cleanup")
+try:
+    level1()
+catch e:
+    print("caught from level3:", e)
+
+# a class method that throws, and an error value used afterwards
+class Account:
+    var balance = 10
+    fn withdraw(n: Int):
+        if n > balance:
+            throw f"insufficient funds: {balance} < {n}"
+        balance -= n
+var acc = Account()
+try:
+    acc.withdraw(4)
+    acc.withdraw(40)
+catch e:
+    print(e, acc.balance)
+
+# catching many errors in a loop must not leak handlers
+var caught = 0
+for i in 1..2000:
+    try:
+        throw "x"
+    catch e:
+        caught += 1
+print(caught)
+print("done")

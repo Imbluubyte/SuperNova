@@ -1,0 +1,5 @@
+print("start")
+try:
+    throw "bad thing"
+finally:
+    print("cleanup")

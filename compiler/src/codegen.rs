@@ -15,6 +15,8 @@ use std::collections::HashMap;
 
 mod classes;
 mod dicts;
+mod errors;
+use errors::{assigned_in_try, Jump, TryFrame};
 mod collections;
 
 thread_local! {
@@ -174,6 +176,10 @@ struct Ctx {
     /// Class whose method is being compiled (gives access to `self`, fields, private members).
     cur_class: Option<usize>,
     fn_name: String,
+    /// Open try/finally regions, innermost last (see errors.rs).
+    try_stack: Vec<TryFrame>,
+    /// Locals that must be `volatile` because a try body assigns them.
+    volatile: std::collections::HashSet<String>,
 }
 
 impl Ctx {
@@ -188,6 +194,8 @@ impl Ctx {
             indent: 1,
             cur_class: None,
             fn_name: String::new(),
+            try_stack: Vec::new(),
+            volatile: std::collections::HashSet::new(),
         }
     }
 }
@@ -319,6 +327,10 @@ fn always_returns(body: &[Stmt]) -> bool {
 fn stmt_returns(s: &Stmt) -> bool {
     match &s.kind {
         StmtKind::Return(_) | StmtKind::Throw(_) => true,
+        StmtKind::Try { body, catch, finally } => {
+            finally.as_ref().map_or(false, |f| always_returns(f))
+                || (always_returns(body) && catch.as_ref().map_or(true, |(_, b)| always_returns(b)))
+        }
         StmtKind::If { branches, else_body } => match else_body {
             Some(e) => branches.iter().all(|(_, b)| always_returns(b)) && always_returns(e),
             None => false,
@@ -352,6 +364,7 @@ impl<'a> Gen<'a> {
             }
         }
         self.collect_classes(module)?;
+        self.cx.volatile = assigned_in_try(&module.items);
         // Pass 2: top-level statements form the program entry point.
         for s in &module.items {
             if !matches!(s.kind, StmtKind::Fn(_) | StmtKind::Class(_)) {
@@ -384,6 +397,7 @@ impl<'a> Gen<'a> {
         out.push_str("static void sn_main(void) {\n");
         out.push_str(&main_body);
         out.push_str("}\n\nint main(void) {\n    sn_gc_init(__builtin_frame_address(0));\n");
+        out.push_str("    sn_gc_root(&sn_exc, sizeof(sn_exc));\n");
         for g in &self.global_roots {
             out.push_str(&format!("    sn_gc_root(&{0}, sizeof({0}));\n", g));
         }
@@ -568,6 +582,7 @@ impl<'a> Gen<'a> {
 
         let mut cx = Ctx::new(true);
         cx.ret_decl = declared;
+        cx.volatile = assigned_in_try(&decl.body);
         let mut params_c = Vec::new();
         for (p, t) in decl.params.iter().zip(&ptys) {
             let pc = format!("v_{}", p.name);
@@ -578,7 +593,8 @@ impl<'a> Gen<'a> {
                 return err(format!("duplicate parameter '{}'", p.name), decl.span);
             }
             let tc = self.cty(*t);
-            params_c.push(format!("{} {}", tc, pc));
+            let q = if cx.volatile.contains(&p.name) { " volatile" } else { "" };
+            params_c.push(format!("{}{} {}", tc, q, pc));
         }
         let saved = std::mem::replace(&mut self.cx, cx);
         let res = self.fn_body(decl, declared);
@@ -1181,7 +1197,8 @@ impl<'a> Gen<'a> {
                     }
                     let cname = format!("v_{}_{}", name, self.fresh());
                     let tc = self.cty(t);
-                    self.line(&format!("{} {} = {};", tc, cname, c));
+                    let q = if self.cx.volatile.contains(name) { " volatile" } else { "" };
+                    self.line(&format!("{}{} {} = {};", tc, q, cname, c));
                     self.cx
                         .scopes
                         .last_mut()
@@ -1349,7 +1366,7 @@ impl<'a> Gen<'a> {
                             return err("this function must return a value", s.span);
                         }
                         self.cx.rets.push(Ty::Void);
-                        self.line("return;");
+                        self.emit_jump(Jump::Return(None));
                     }
                     Some(e) => {
                         let hint = self.cx.ret_decl;
@@ -1370,8 +1387,15 @@ impl<'a> Gen<'a> {
                             },
                             None => v.c,
                         };
+                        let rty = match self.cx.ret_decl {
+                            Some(t) => t,
+                            None => v.ty,
+                        };
                         self.cx.rets.push(v.ty);
-                        self.line(&format!("return {};", c));
+                        if rty == Ty::Void {
+                            return err("this function returns nothing, so it cannot return a value", s.span);
+                        }
+                        self.emit_jump(Jump::Return(Some((c, rty))));
                     }
                 }
                 Ok(())
@@ -1380,14 +1404,14 @@ impl<'a> Gen<'a> {
                 if self.cx.loop_depth == 0 {
                     return err("'break' outside of a loop", s.span);
                 }
-                self.line("break;");
+                self.emit_jump(Jump::Break);
                 Ok(())
             }
             StmtKind::Continue => {
                 if self.cx.loop_depth == 0 {
                     return err("'continue' outside of a loop", s.span);
                 }
-                self.line("continue;");
+                self.emit_jump(Jump::Continue);
                 Ok(())
             }
             StmtKind::Pass => Ok(()),
@@ -1402,8 +1426,8 @@ impl<'a> Gen<'a> {
                 format!("class '{}' must be declared at module level, not inside a function or block", c.name),
                 s.span,
             ),
-            StmtKind::Try { .. } => nyi("try/catch/finally", s.span),
-            StmtKind::Throw(_) => nyi("throw", s.span),
+            StmtKind::Try { body, catch, finally } => self.try_stmt(body, catch, finally),
+            StmtKind::Throw(e) => self.throw_stmt(e, s.span),
             StmtKind::Use { .. } => err("'use' must be at the top level of a file", s.span),
             StmtKind::Manages(_) => nyi("'manages'", s.span),
         }

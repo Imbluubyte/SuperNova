@@ -439,6 +439,7 @@ impl<'a> Gen<'a> {
 
         let mut cx = Ctx::new(true);
         cx.ret_decl = declared;
+        cx.volatile = super::assigned_in_try(&decl.body);
         cx.cur_class = Some(owner);
         cx.fn_name = decl.name.clone();
         cx.scopes[0].insert(
@@ -458,7 +459,8 @@ impl<'a> Gen<'a> {
                 return err(format!("duplicate parameter '{}'", p.name), decl.span);
             }
             let tc = self.cty(*t);
-            params_c.push(format!("{} {}", tc, pc));
+            let q = if cx.volatile.contains(&p.name) { " volatile" } else { "" };
+            params_c.push(format!("{}{} {}", tc, q, pc));
         }
         let saved = std::mem::replace(&mut self.cx, cx);
         let res = self.method_body(owner, decl, declared);
