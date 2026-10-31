@@ -1,0 +1,146 @@
+class Player:
+    var health = 100
+    var speed = 5.0
+    var name = "Hero"
+    var inventory: List[String] = []
+
+    fn onCreation():
+        print("Player created!")
+
+    fn takeDamage(amount):
+        health -= amount
+
+    fn isAlive():
+        return health > 0
+
+    fn pickUp(item: String):
+        inventory.add(item)
+
+    fn describe() -> String:
+        return f"{name}: hp={health} items={inventory}"
+
+var p = Player()
+p.takeDamage(30)
+p.pickUp("sword")
+p.pickUp("shield")
+print(p.describe(), p.isAlive())
+p.health += 5
+p.name = "Ada"
+print(p.health, p.name, p.speed)
+p.takeDamage(500)
+print(p.isAlive(), p.health)
+
+# constructor arguments, defaults, named arguments, self
+class Vec2:
+    var x = 0.0
+    var y = 0.0
+
+    fn onCreation(px = 0.0, py = 0.0):
+        x = px
+        y = py
+
+    fn length2():
+        return self.x * self.x + self.y * self.y
+
+    fn add(other: Vec2) -> Vec2:
+        return Vec2(x + other.x, y + other.y)
+
+    fn toString() -> String:
+        return f"({x}, {y})"
+
+var a = Vec2(3, 4)
+var b = Vec2(py=1.5)
+print(a, b, a.add(b), a.length2())
+print(f"vector: {a.add(a)}", str(b))
+
+# inheritance, overriding, virtual dispatch
+class Entity:
+    var hp = 10
+    var label = "entity"
+
+    fn onCreation(start_hp = 10):
+        hp = start_hp
+        print(f"Entity({hp})")
+
+    fn describe() -> String:
+        return f"{label} with {hp} hp"
+
+    fn hit(amount: Int):
+        hp -= amount
+
+    fn speak() -> String:
+        return "..."
+
+    fn intro() -> String:
+        return describe() + " says " + speak()
+
+class Goblin extends Entity:
+    var loot = 3
+
+    fn onCreation():
+        label = "goblin"
+        print("Goblin ready")
+
+    fn speak() -> String:
+        return "Grr"
+
+class Dragon extends Goblin:
+    var fire = 50
+
+    fn onCreation(power):
+        super.onCreation()
+        fire = power
+        label = "dragon"
+
+    fn speak() -> String:
+        return "ROAR (" + super.speak() + ")"
+
+    fn hit(amount: Int):
+        super.hit(amount // 2)
+
+var e = Entity(7)
+var g = Goblin()
+var d = Dragon(99)
+print(e.intro())
+print(g.intro())
+print(d.intro())
+print(d.fire, d.loot, d.hp)
+
+var creatures: List[Entity] = [e, g, d]
+for c in creatures:
+    c.hit(10)
+    print(c.describe())
+
+# a list literal of subclasses takes the common parent class
+var mix = [g, d]
+mix[1].hit(4)
+print(mix[1].hp, mix.length())
+
+# filtering by class narrows the element type
+var gobs = creatures.filter(Goblin)
+print(gobs.length(), gobs[1].loot, creatures.filter(Dragon).length())
+
+# object identity
+var same = d
+print(same == d, d == g, creatures[3] == d)
+print(creatures.contains(g), p)
+
+# objects holding other objects
+class Team:
+    var members: List[Entity] = []
+    var leader = Entity(1)
+
+    fn add(m: Entity):
+        members.add(m)
+
+    fn totalHp() -> Int:
+        var total = 0
+        for m in members:
+            total += m.hp
+        return total
+
+var t = Team()
+t.add(g)
+t.add(d)
+t.leader = d
+print(t.totalHp(), t.leader.hp, t.members.length())

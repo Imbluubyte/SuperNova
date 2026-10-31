@@ -1,0 +1,5 @@
+class A:
+    fn f():
+        super.f()
+var a = A()
+a.f()

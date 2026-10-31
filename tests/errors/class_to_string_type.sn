@@ -1,0 +1,3 @@
+class A:
+    fn toString():
+        return 5

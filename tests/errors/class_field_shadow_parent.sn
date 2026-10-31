@@ -1,0 +1,5 @@
+class A:
+    var x = 1
+class B extends A:
+    var x = 2
+var b = B()

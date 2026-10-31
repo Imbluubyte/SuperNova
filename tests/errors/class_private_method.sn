@@ -1,0 +1,5 @@
+class A:
+    private fn hidden():
+        pass
+var a = A()
+a.hidden()

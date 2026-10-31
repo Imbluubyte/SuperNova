@@ -44,6 +44,7 @@ impl<'a> Gen<'a> {
             Ty::Null => "int8_t".into(),
             Ty::Void => "void".into(),
             Ty::Any => "SnVal".into(),
+            Ty::Class(c) => format!("SnO_{}*", c),
             Ty::List(_) => format!("{}*", self.type_name(t)),
             Ty::Tuple(_) => self.type_name(t),
         }
@@ -112,6 +113,21 @@ impl<'a> Gen<'a> {
         }
         if es.iter().all(|e| e.ty.is_scalar() || e.ty == Ty::Any) {
             return Ok(Ty::Any);
+        }
+        if es.iter().all(|e| matches!(e.ty, Ty::Class(_))) {
+            // The nearest class that all the elements are instances of.
+            let Ty::Class(first_c) = first else { unreachable!() };
+            let mut cur = Some(first_c as usize);
+            while let Some(c) = cur {
+                if es.iter().all(|e| matches!(e.ty, Ty::Class(k) if self.is_subclass(k as usize, c))) {
+                    return Ok(Ty::Class(c as u32));
+                }
+                cur = self.classes[c].parent;
+            }
+            return err(
+                "list elements are instances of unrelated classes; give them a common parent class",
+                span,
+            );
         }
         let names: Vec<String> = es.iter().map(|e| e.ty.name()).collect();
         err(
@@ -202,11 +218,12 @@ impl<'a> Gen<'a> {
                 }
                 let ln = self.type_name(b.ty);
                 let loc = self.loc(span);
-                let pure = b.pure && i.pure;
                 let c = self.seq2(&b, &i, move |a, x| {
                     format!("(*{}_at({}, {}, {}))", ln, a, x, loc)
                 });
-                Ok(E::new(c, *elem, pure))
+                // Reading an element depends on the list's current contents, so it is
+                // not order-independent (a call elsewhere in the expression could change it).
+                Ok(E::new(c, *elem, false))
             }
             Ty::Tuple(items) => match &idx.kind {
                 ExprKind::Int(n) => {
@@ -244,8 +261,11 @@ impl<'a> Gen<'a> {
         value: &Expr,
         span: Span,
     ) -> R<()> {
+        if let ExprKind::Member(ox, fname) = &target.kind {
+            return self.assign_field(ox, fname, op, value, span);
+        }
         let ExprKind::Index(bx, ix) = &target.kind else {
-            return nyi("assignment to member access", span);
+            return err("this expression cannot be assigned to", span);
         };
         let b = self.val(bx)?;
         let elem = match b.ty {
@@ -300,6 +320,55 @@ impl<'a> Gen<'a> {
         Ok(())
     }
 
+    /// `obj.field = v` and `obj.field += v`.
+    fn assign_field(
+        &mut self,
+        ox: &Expr,
+        fname: &str,
+        op: Option<BinOp>,
+        value: &Expr,
+        span: Span,
+    ) -> R<()> {
+        if matches!(&ox.kind, ExprKind::Ident(n) if n == "super") {
+            return err("'super' can only be used as super.method(...)", span);
+        }
+        let o = self.val(ox)?;
+        let Ty::Class(c) = o.ty else {
+            return err(format!("cannot assign to a field of a {}", o.ty.name()), span);
+        };
+        let f = self.field_of(c as usize, fname, span)?;
+        if f.is_const {
+            return err(format!("cannot assign to constant field '{}'", fname), span);
+        }
+        let rhs = match op {
+            None => self.hinted(value, Some(f.ty))?,
+            Some(_) => self.val(value)?,
+        };
+        let n = self.fresh();
+        let rv = format!("r{}", n);
+        let combined = match op {
+            None => E::new(rv.clone(), rhs.ty, true),
+            Some(bop) => {
+                let cur = E::new(format!("o{}->f_{}", n, fname), f.ty, true);
+                self.binary(bop, cur, E::new(rv.clone(), rhs.ty, true), span)?
+            }
+        };
+        let cty_ = combined.ty;
+        let Some(cv) = self.coerce(combined.c, cty_, f.ty) else {
+            return err(
+                format!("cannot assign {} to field '{}' which has type {}", cty_.name(), fname, f.ty.name()),
+                span,
+            );
+        };
+        let oc = self.cty(o.ty);
+        let rc = self.cty(rhs.ty);
+        self.line(&format!(
+            "{{ {oc} o{n} = {obj}; {rc} {rv} = {r}; o{n}->f_{f} = {cv}; }}",
+            oc = oc, n = n, obj = o.c, rc = rc, rv = rv, r = rhs.c, f = fname, cv = cv
+        ));
+        Ok(())
+    }
+
     /// `for x in some_list:`
     pub(super) fn for_each(&mut self, var: &str, iter: &Expr, body: &[Stmt]) -> R<()> {
         let l = self.val(iter)?;
@@ -324,7 +393,7 @@ impl<'a> Gen<'a> {
         self.line(&format!("{} {} = l{}->data[i{}];", ec, cname, n, n));
         self.cx.scopes.last_mut().unwrap().insert(
             var.to_string(),
-            Var { ty: *elem, is_const: true, cname },
+            Var { ty: *elem, is_const: true, cname, shared: false },
         );
         self.cx.loop_depth += 1;
         for st in body {
@@ -348,6 +417,9 @@ impl<'a> Gen<'a> {
         span: Span,
     ) -> R<E> {
         let o = self.val(obj)?;
+        if let Ty::Class(c) = o.ty {
+            return self.call_method(o, c as usize, name, args, span, false);
+        }
         let Ty::List(elem_ref) = o.ty else {
             return err(format!("{} has no method '{}'", o.ty.name(), name), span);
         };
@@ -508,6 +580,8 @@ impl<'a> Gen<'a> {
             }
         };
 
+        // When the predicate is a type, the result list has that (narrower) element type.
+        let mut narrow: Option<(Ty, String)> = None;
         let cond: String = match &first.kind {
             ExprKind::Predicate(op, operand) => {
                 if args.len() != 1 {
@@ -526,11 +600,50 @@ impl<'a> Gen<'a> {
                 test.c
             }
             ExprKind::Null if args.len() == 1 => type_test(Ty::Null, &x),
+            ExprKind::Ident(name) if self.class_ix.contains_key(name) => {
+                if args.len() != 1 {
+                    return err("a type predicate takes no extra arguments", span);
+                }
+                let k = self.class_ix[name];
+                let Ty::Class(e) = elem else {
+                    return err(
+                        format!("cannot filter a {} by class {}", o.ty.name(), name),
+                        first.span,
+                    );
+                };
+                let e = e as usize;
+                if self.is_subclass(e, k) {
+                    "true".to_string() // every element already is a `name`
+                } else if self.is_subclass(k, e) {
+                    let (lo, hi) = (self.classes[k].id_lo, self.classes[k].id_hi);
+                    narrow = Some((Ty::Class(k as u32), format!("((SnO_{}*){})", k, x)));
+                    format!("({x}->cls >= {lo} && {x}->cls <= {hi})", x = x, lo = lo, hi = hi)
+                } else {
+                    return err(
+                        format!(
+                            "no element of a {} can be a {}: the classes are unrelated",
+                            o.ty.name(),
+                            name
+                        ),
+                        first.span,
+                    );
+                }
+            }
             ExprKind::Ident(name) if !self.fns.contains_key(name) && type_pred(name).is_some() => {
                 if args.len() != 1 {
                     return err("a type predicate takes no extra arguments", span);
                 }
-                type_test(type_pred(name).unwrap(), &x)
+                let target = type_pred(name).unwrap();
+                if elem == Ty::Any {
+                    let field = match target {
+                        Ty::Int => "i",
+                        Ty::Float => "f",
+                        Ty::Bool => "b",
+                        _ => "s",
+                    };
+                    narrow = Some((target, format!("{}.u.{}", x, field)));
+                }
+                type_test(target, &x)
             }
             ExprKind::Ident(name) if self.fns.contains_key(name) => {
                 // Lower to the call `name($x, $p0, ...)` where `$x` is the current element and
@@ -538,7 +651,7 @@ impl<'a> Gen<'a> {
                 let mut scope: HashMap<String, Var> = HashMap::new();
                 scope.insert(
                     "$x".to_string(),
-                    Var { ty: elem, is_const: true, cname: x.clone() },
+                    Var { ty: elem, is_const: true, cname: x.clone(), shared: false },
                 );
                 let mut cargs = vec![Arg {
                     name: None,
@@ -551,7 +664,7 @@ impl<'a> Gen<'a> {
                     let pname = format!("p{}_{}", n, k);
                     pre.push_str(&format!("{} {} = {}; ", pc, pname, v.c));
                     let vn = format!("$p{}", k);
-                    scope.insert(vn.clone(), Var { ty: vty, is_const: true, cname: pname });
+                    scope.insert(vn.clone(), Var { ty: vty, is_const: true, cname: pname, shared: false });
                     cargs.push(Arg {
                         name: a.name.clone(),
                         value: Expr { kind: ExprKind::Ident(vn), span: a.value.span },
@@ -577,11 +690,16 @@ impl<'a> Gen<'a> {
             _ => return err(usage, first.span),
         };
         let head = format!("{}* {} = {};", ln, l, o.c);
+        let (rty, push_v) = match &narrow {
+            Some((t, conv)) => (Ty::list_of(*t), conv.clone()),
+            None => (o.ty, x.clone()),
+        };
+        let rln = self.type_name(rty);
         Ok(E::new(
             format!(
-                "({{ {head} {pre}{ln}* r{n} = {ln}_new({l}->len); for (int64_t i{n} = 0; i{n} < {l}->len; i{n}++) {{ {ec} {x} = {l}->data[i{n}]; if ({cond}) {ln}_push(r{n}, {x}); }} r{n}; }})"
+                "({{ {head} {pre}{rln}* r{n} = {rln}_new({l}->len); for (int64_t i{n} = 0; i{n} < {l}->len; i{n}++) {{ {ec} {x} = {l}->data[i{n}]; if ({cond}) {rln}_push(r{n}, {push_v}); }} r{n}; }})"
             ),
-            o.ty,
+            rty,
             false,
         ))
     }
@@ -722,6 +840,26 @@ impl<'a> Gen<'a> {
             Ty::List(_) | Ty::Tuple(_) => {
                 let f = self.fmt_fn(ty);
                 format!("{}(&{}, {}); ", f, b, c)
+            }
+            Ty::Class(k) => {
+                let k = k as usize;
+                let has_to_string = self
+                    .find_method(k, "toString")
+                    .map_or(false, |(_, d)| d.params.is_empty() && !d.is_private);
+                let call = if has_to_string {
+                    let recv = E::new(c.to_string(), ty, true);
+                    let sp = Span { line: 0, col: 0 };
+                    self.call_method(recv, k, "toString", &[], sp, false).ok().filter(|e| e.ty == Ty::Str)
+                } else {
+                    None
+                };
+                match call {
+                    Some(e) => format!("sn_buf_str(&{}, {}); ", b, e.c),
+                    None => {
+                        let text = format!("<{}>", self.classes[k].name);
+                        format!("sn_buf_text(&{}, \"{}\", {}); ", b, text, text.len())
+                    }
+                }
             }
             Ty::Void => String::new(),
         }

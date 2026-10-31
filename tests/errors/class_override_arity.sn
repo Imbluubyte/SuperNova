@@ -1,0 +1,7 @@
+class A:
+    fn f(x):
+        pass
+class B extends A:
+    fn f(x, y):
+        pass
+var b = B()

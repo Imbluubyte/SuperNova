@@ -1,0 +1,3 @@
+class A:
+    pass
+var a = A(1)

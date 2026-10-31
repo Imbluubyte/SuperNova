@@ -1,0 +1,5 @@
+class A:
+    var x = 1
+    fn x():
+        pass
+var a = A()

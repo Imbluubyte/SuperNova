@@ -1,0 +1,3 @@
+class Node:
+    var next = Node()
+var n = Node()

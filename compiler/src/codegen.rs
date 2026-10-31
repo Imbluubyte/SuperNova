@@ -13,7 +13,13 @@ use crate::ast::*;
 use crate::lexer::{CompileError, Span};
 use std::collections::HashMap;
 
+mod classes;
 mod collections;
+
+thread_local! {
+    /// Class names by class index, so `Ty::name()` can print them.
+    static CLASS_NAMES: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+}
 
 type R<T> = Result<T, CompileError>;
 
@@ -41,6 +47,8 @@ enum Ty {
     /// Reference type; compound types are interned by leaking (compiler is short-lived).
     List(&'static Ty),
     Tuple(&'static [Ty]),
+    /// Instance of a user class (index into `Gen::classes`); a reference to a heap object.
+    Class(u32),
 }
 
 impl Ty {
@@ -53,6 +61,7 @@ impl Ty {
             Ty::Null => "null".into(),
             Ty::Void => "nothing".into(),
             Ty::Any => "Any".into(),
+            Ty::Class(c) => CLASS_NAMES.with(|n| n.borrow()[c as usize].clone()),
             Ty::List(e) => format!("List[{}]", e.name()),
             Ty::Tuple(items) => format!(
                 "Tuple[{}]",
@@ -68,7 +77,7 @@ impl Ty {
     fn has_ptrs(self) -> bool {
         match self {
             Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void => false,
-            Ty::Str | Ty::Any | Ty::List(_) => true,
+            Ty::Str | Ty::Any | Ty::List(_) | Ty::Class(_) => true,
             Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
         }
     }
@@ -103,6 +112,42 @@ struct Var {
     ty: Ty,
     is_const: bool,
     cname: String,
+    /// Globals and object fields can change when any function runs, so reading
+    /// them is not order-independent (see `E::pure`).
+    shared: bool,
+}
+
+#[derive(Clone)]
+struct FieldInfo {
+    name: String,
+    ty: Ty,
+    owner: usize,
+    is_private: bool,
+    is_const: bool,
+    /// C expression that computes the initial value.
+    init_c: String,
+}
+
+struct ClassInfo<'a> {
+    name: String,
+    decl: &'a ClassDecl,
+    parent: Option<usize>,
+    /// Depth-first numbering: this class's id is `id_lo`; its subclasses use ids up to `id_hi`.
+    id_lo: i64,
+    id_hi: i64,
+    /// 0 = not computed, 1 = in progress, 2 = done.
+    layout: u8,
+    /// All fields including inherited ones, parents first.
+    fields: Vec<FieldInfo>,
+    methods: HashMap<String, &'a FnDecl>,
+    ctor_emitted: bool,
+}
+
+struct Bound {
+    ptys: Vec<Ty>,
+    cargs: Vec<E>,
+    /// Parameter indexes in the order the arguments were written.
+    written: Vec<usize>,
 }
 
 struct Inst {
@@ -119,6 +164,9 @@ struct Ctx {
     loop_depth: usize,
     out: String,
     indent: usize,
+    /// Class whose method is being compiled (gives access to `self`, fields, private members).
+    cur_class: Option<usize>,
+    fn_name: String,
 }
 
 impl Ctx {
@@ -131,6 +179,8 @@ impl Ctx {
             loop_depth: 0,
             out: String::new(),
             indent: 1,
+            cur_class: None,
+            fn_name: String::new(),
         }
     }
 }
@@ -157,6 +207,11 @@ struct Gen<'a> {
     fmt_decls: String,
     /// Globals whose memory the collector must scan.
     global_roots: Vec<String>,
+    classes: Vec<ClassInfo<'a>>,
+    class_ix: HashMap<String, usize>,
+    minsts: HashMap<(usize, String, Vec<Ty>), Inst>,
+    fwd_decls: String,
+    class_structs: String,
 }
 
 pub fn generate<'a>(module: &'a Module, file: &str) -> R<String> {
@@ -178,6 +233,11 @@ pub fn generate<'a>(module: &'a Module, file: &str) -> R<String> {
         fmt_fns: HashMap::new(),
         fmt_decls: String::new(),
         global_roots: Vec::new(),
+        classes: Vec::new(),
+        class_ix: HashMap::new(),
+        minsts: HashMap::new(),
+        fwd_decls: String::new(),
+        class_structs: String::new(),
     };
     g.run(module)
 }
@@ -272,6 +332,9 @@ impl<'a> Gen<'a> {
                 if BUILTINS.contains(&f.name.as_str()) {
                     return err(format!("cannot redefine builtin function '{}'", f.name), f.span);
                 }
+                if matches!(f.name.as_str(), "self" | "super") {
+                    return err(format!("'{}' is a reserved name", f.name), f.span);
+                }
                 if self.fns.insert(f.name.clone(), f).is_some() {
                     return err(format!("function '{}' is already defined", f.name), f.span);
                 }
@@ -281,9 +344,10 @@ impl<'a> Gen<'a> {
                 self.fn_order.push(f);
             }
         }
+        self.collect_classes(module)?;
         // Pass 2: top-level statements form the program entry point.
         for s in &module.items {
-            if !matches!(s.kind, StmtKind::Fn(_)) {
+            if !matches!(s.kind, StmtKind::Fn(_) | StmtKind::Class(_)) {
                 self.stmt(s)?;
             }
         }
@@ -298,14 +362,17 @@ impl<'a> Gen<'a> {
                 self.instance(f, ptys, f.span)?;
             }
         }
+        self.check_classes()?;
         let main_body = std::mem::take(&mut self.cx.out);
         let mut out = String::new();
         out.push_str("/* generated by snc — do not edit */\n");
         out.push_str(&self.lits);
+        out.push_str(&self.fwd_decls);
         out.push_str(&self.type_decls);
-        out.push_str(&self.fmt_decls);
+        out.push_str(&self.class_structs);
         out.push_str(&self.global_decls);
         out.push_str(&self.protos);
+        out.push_str(&self.fmt_decls);
         out.push_str(&self.bodies);
         out.push_str("static void sn_main(void) {\n");
         out.push_str(&main_body);
@@ -361,7 +428,10 @@ impl<'a> Gen<'a> {
                 "Bool" => Ok(Ty::Bool),
                 "String" => Ok(Ty::Str),
                 "Any" => Ok(Ty::Any),
-                other => err(format!("unknown type '{}'", other), span),
+                other => match self.class_ix.get(other) {
+                    Some(&c) => Ok(Ty::Class(c as u32)),
+                    None => err(format!("unknown type '{}'", other), span),
+                },
             },
             TypeExpr::List(inner) => Ok(Ty::list_of(self.resolve_type(inner, span)?)),
             TypeExpr::Tuple(items) => {
@@ -375,10 +445,22 @@ impl<'a> Gen<'a> {
         }
     }
 
-    fn lookup(&self, name: &str, span: Span) -> R<Var> {
+    fn lookup(&mut self, name: &str, span: Span) -> R<Var> {
         for sc in self.cx.scopes.iter().rev() {
             if let Some(v) = sc.get(name) {
                 return Ok(v.clone());
+            }
+        }
+        if let Some(cc) = self.cx.cur_class {
+            self.ensure_layout(cc)?;
+            if let Some(f) = self.classes[cc].fields.iter().find(|f| f.name == name).cloned() {
+                self.check_access(f.owner, f.is_private, "field", name, span)?;
+                return Ok(Var {
+                    ty: f.ty,
+                    is_const: f.is_const,
+                    cname: format!("(v_self->f_{})", name),
+                    shared: true,
+                });
             }
         }
         if let Some(v) = self.globals.get(name) {
@@ -387,10 +469,16 @@ impl<'a> Gen<'a> {
         if self.fns.contains_key(name) {
             return nyi("using functions as values", span);
         }
+        if name == "self" {
+            return err("'self' can only be used inside a class method", span);
+        }
+        if name == "super" {
+            return err("'super' can only be used as super.method(...)", span);
+        }
         err(format!("undefined variable '{}'", name), span)
     }
 
-    /// Implicit conversions: only Int -> Float.
+    /// Implicit conversions: Int -> Float, scalars -> Any, subclass -> superclass.
     fn coerce(&self, c: String, from: Ty, to: Ty) -> Option<String> {
         if from == to {
             Some(c)
@@ -398,6 +486,12 @@ impl<'a> Gen<'a> {
             Some(format!("((double)({}))", c))
         } else if to == Ty::Any && from.is_scalar() {
             Some(box_any(&c, from))
+        } else if let (Ty::Class(a), Ty::Class(b)) = (from, to) {
+            if self.is_subclass(a as usize, b as usize) {
+                Some(format!("((SnO_{}*)({}))", b, c))
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -461,7 +555,7 @@ impl<'a> Gen<'a> {
         for (p, t) in decl.params.iter().zip(&ptys) {
             let pc = format!("v_{}", p.name);
             if cx.scopes[0]
-                .insert(p.name.clone(), Var { ty: *t, is_const: false, cname: pc.clone() })
+                .insert(p.name.clone(), Var { ty: *t, is_const: false, cname: pc.clone(), shared: false })
                 .is_some()
             {
                 return err(format!("duplicate parameter '{}'", p.name), decl.span);
@@ -527,6 +621,9 @@ impl<'a> Gen<'a> {
 
     fn call(&mut self, callee: &Expr, args: &[Arg], span: Span) -> R<E> {
         if let ExprKind::Member(obj, method) = &callee.kind {
+            if matches!(&obj.kind, ExprKind::Ident(n) if n == "super") {
+                return self.super_call(method, args, span);
+            }
             return self.method_call(obj, method, args, span);
         }
         let ExprKind::Ident(name) = &callee.kind else {
@@ -535,11 +632,53 @@ impl<'a> Gen<'a> {
         if BUILTINS.contains(&name.as_str()) {
             return self.builtin(name, args, span);
         }
+        if let Some(&c) = self.class_ix.get(name) {
+            return self.construct(c, args, span);
+        }
+        if let Some(cc) = self.cx.cur_class {
+            if self.find_method(cc, name).is_some() {
+                let recv = E::new("v_self", Ty::Class(cc as u32), true);
+                return self.call_method(recv, cc, name, args, span, false);
+            }
+        }
         let Some(&decl) = self.fns.get(name) else {
             return err(format!("undefined function '{}'", name), span);
         };
+        let bound = self.bind_args(decl, name, args, span)?;
+        let (cname, ret) = self.instance(decl, bound.ptys.clone(), span)?;
+        let n = decl.params.len();
+        let impure = bound.written.iter().filter(|&&i| !bound.cargs[i].pure).count();
+        let text = if impure >= 2 {
+            // Preserve source-order evaluation of arguments.
+            let k = self.fresh();
+            let mut s = String::from("({ ");
+            for &i in &bound.written {
+                let tc = self.cty(bound.cargs[i].ty);
+                s.push_str(&format!("{} a{}_{} = {}; ", tc, k, i, bound.cargs[i].c));
+            }
+            let mut final_args = Vec::new();
+            for i in 0..n {
+                if bound.written.contains(&i) {
+                    final_args.push(format!("a{}_{}", k, i));
+                } else {
+                    final_args.push(bound.cargs[i].c.clone());
+                }
+            }
+            s.push_str(&format!("{}({}); }})", cname, final_args.join(", ")));
+            s
+        } else {
+            format!(
+                "{}({})",
+                cname,
+                bound.cargs.iter().map(|a| a.c.clone()).collect::<Vec<_>>().join(", ")
+            )
+        };
+        Ok(E::new(text, ret, false))
+    }
 
-        // Bind arguments to parameter slots; remember source order for evaluation.
+    /// Match call arguments to the parameters of `decl` (positional, named, defaults),
+    /// check their types and decide each parameter's type for this call.
+    fn bind_args(&mut self, decl: &'a FnDecl, name: &str, args: &[Arg], span: Span) -> R<Bound> {
         let n = decl.params.len();
         let mut slots: Vec<Option<E>> = (0..n).map(|_| None).collect();
         let mut written: Vec<usize> = Vec::new();
@@ -577,7 +716,11 @@ impl<'a> Gen<'a> {
                     a.value.span,
                 );
             }
-            slots[idx] = Some(self.val(&a.value)?);
+            let hint = match &decl.params[idx].ty {
+                Some(t) => Some(self.resolve_type(t, decl.span)?),
+                None => None,
+            };
+            slots[idx] = Some(self.hinted(&a.value, hint)?);
             written.push(idx);
         }
         // Defaults are evaluated in a context with no caller locals.
@@ -631,36 +774,7 @@ impl<'a> Gen<'a> {
             ptys.push(pt);
             cargs.push(E::new(c, pt, a.pure));
         }
-        let (cname, ret) = self.instance(decl, ptys, span)?;
-        let impure = written.iter().filter(|&&i| !cargs[i].pure).count();
-        let text = if impure >= 2 {
-            // Preserve source-order evaluation of arguments.
-            let k = self.fresh();
-            let mut s = String::from("({ ");
-            for &i in &written {
-                let tc = self.cty(cargs[i].ty);
-                s.push_str(&format!("{} a{}_{} = {}; ", tc, k, i, cargs[i].c));
-            }
-            let names: Vec<String> = (0..n).map(|i| format!("a{}_{}", k, i)).collect();
-            // Defaulted params were not written; inline them.
-            let mut final_args = Vec::new();
-            for i in 0..n {
-                if written.contains(&i) {
-                    final_args.push(names[i].clone());
-                } else {
-                    final_args.push(cargs[i].c.clone());
-                }
-            }
-            s.push_str(&format!("{}({}); }})", cname, final_args.join(", ")));
-            s
-        } else {
-            format!(
-                "{}({})",
-                cname,
-                cargs.iter().map(|a| a.c.clone()).collect::<Vec<_>>().join(", ")
-            )
-        };
-        Ok(E::new(text, ret, false))
+        Ok(Bound { ptys, cargs, written })
     }
 
     fn builtin(&mut self, name: &str, args: &[Arg], span: Span) -> R<E> {
@@ -712,7 +826,7 @@ impl<'a> Gen<'a> {
                     ("str", Ty::Float) => (format!("sn_float_to_str({})", v.c), Ty::Str),
                     ("str", Ty::Bool) => (format!("sn_bool_to_str({})", v.c), Ty::Str),
                     ("str", Ty::Null) => (format!("sn_null_to_str({})", v.c), Ty::Str),
-                    ("str", Ty::Any) | ("str", Ty::List(_)) | ("str", Ty::Tuple(_)) => {
+                    ("str", Ty::Any) | ("str", Ty::List(_)) | ("str", Ty::Tuple(_)) | ("str", Ty::Class(_)) => {
                         (self.to_str(&v), Ty::Str)
                     }
                     ("int", Ty::Int) => (v.c, Ty::Int),
@@ -749,7 +863,7 @@ impl<'a> Gen<'a> {
             ExprKind::Null => Ok(E::new("0", Ty::Null, true)),
             ExprKind::Ident(name) => {
                 let v = self.lookup(name, e.span)?;
-                Ok(E::new(v.cname, v.ty, true))
+                Ok(E::new(v.cname, v.ty, !v.shared))
             }
             ExprKind::FStr(parts) => self.fstr(parts),
             ExprKind::Unary(op, x) => {
@@ -778,7 +892,7 @@ impl<'a> Gen<'a> {
             ExprKind::Dict(_) => nyi("dictionaries", e.span),
             ExprKind::Tuple(items) => self.tuple_literal(items, e.span),
             ExprKind::Index(base, idx) => self.index_expr(base, idx, e.span),
-            ExprKind::Member(..) => nyi("member access", e.span),
+            ExprKind::Member(obj, name) => self.member_expr(obj, name, e.span),
             ExprKind::Range { .. } => nyi("range values (ranges are only usable in 'for' for now)", e.span),
             ExprKind::Predicate(..) => err(
                 "comparison predicates like '< 4' are only valid as call arguments",
@@ -821,6 +935,24 @@ impl<'a> Gen<'a> {
         let (lt, rt) = (l.ty, r.ty);
         if matches!(lt, Ty::List(_)) || matches!(rt, Ty::List(_)) {
             return self.list_binary(op, l, r, span);
+        }
+        if let (Ty::Class(a), Ty::Class(b)) = (lt, rt) {
+            let related = self.is_subclass(a as usize, b as usize) || self.is_subclass(b as usize, a as usize);
+            if matches!(op, Eq | Ne) && related {
+                let sym = op_sym(op);
+                let c = self.seq2(&l, &r, move |x, y| format!("((void*)({}) {} (void*)({}))", x, sym, y));
+                return Ok(E::new(c, Ty::Bool, pure));
+            }
+            return err(
+                format!(
+                    "cannot apply '{}' to {} and {}{}",
+                    op_sym(op),
+                    lt.name(),
+                    rt.name(),
+                    if matches!(op, Eq | Ne) { " (they are unrelated classes)" } else { "; objects can only be compared with == and !=" }
+                ),
+                span,
+            );
         }
         if lt == Ty::Any || rt == Ty::Any {
             return self.any_binary(op, l, r, span);
@@ -976,6 +1108,9 @@ impl<'a> Gen<'a> {
     fn stmt(&mut self, s: &Stmt) -> R<()> {
         match &s.kind {
             StmtKind::VarDecl { name, is_const, ty, init, .. } => {
+                if name == "self" || name == "super" {
+                    return err(format!("'{}' is a reserved name", name), s.span);
+                }
                 let declared = match ty {
                     Some(t) => Some(self.resolve_type(t, s.span)?),
                     None => None,
@@ -1019,7 +1154,7 @@ impl<'a> Gen<'a> {
                     }
                     self.line(&format!("{} = {};", cname, c));
                     self.globals
-                        .insert(name.clone(), Var { ty: t, is_const: *is_const, cname });
+                        .insert(name.clone(), Var { ty: t, is_const: *is_const, cname, shared: true });
                 } else {
                     if self.cx.scopes.last().unwrap().contains_key(name) {
                         return err(format!("'{}' is already declared in this scope", name), s.span);
@@ -1031,7 +1166,7 @@ impl<'a> Gen<'a> {
                         .scopes
                         .last_mut()
                         .unwrap()
-                        .insert(name.clone(), Var { ty: t, is_const: *is_const, cname });
+                        .insert(name.clone(), Var { ty: t, is_const: *is_const, cname, shared: false });
                 }
                 Ok(())
             }
@@ -1135,7 +1270,7 @@ impl<'a> Gen<'a> {
                 self.push_scope();
                 self.cx.scopes.last_mut().unwrap().insert(
                     var.clone(),
-                    Var { ty: Ty::Int, is_const: true, cname },
+                    Var { ty: Ty::Int, is_const: true, cname, shared: false },
                 );
                 self.cx.loop_depth += 1;
                 for st in body {
@@ -1243,7 +1378,10 @@ impl<'a> Gen<'a> {
                 ),
                 f.span,
             ),
-            StmtKind::Class(_) => nyi("classes", s.span),
+            StmtKind::Class(c) => err(
+                format!("class '{}' must be declared at module level, not inside a function or block", c.name),
+                s.span,
+            ),
             StmtKind::Try { .. } => nyi("try/catch/finally", s.span),
             StmtKind::Throw(_) => nyi("throw", s.span),
             StmtKind::Use { .. } => nyi("modules ('use')", s.span),

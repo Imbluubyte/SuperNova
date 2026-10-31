@@ -4,7 +4,7 @@
 - [x] 2. Lexer and parser (full V1 surface syntax)
 - [x] 3. Type checker: variables, expressions, inference
 - [x] 4. C emitter + runtime: control flow, functions, strings
-- [ ] 5. Classes and inheritance
+- [x] 5. Classes and inheritance (single inheritance, onCreation, super, private, virtual dispatch)
 - [x] 6a. Lists, tuples, mixed lists, filter, elementwise arithmetic
 - [ ] 6b. Dictionaries
 - [ ] 7. Modules and `private`

@@ -1,0 +1,4 @@
+class A:
+    fn onCreation(v):
+        pass
+var a = A()

@@ -1,7 +1,7 @@
 # SuperNova language reference (implemented subset)
 
 Everything here is implemented and covered by tests in `tests/`. Syntax that
-parses but is not yet implemented (classes, dictionaries, try/catch, async,
+parses but is not yet implemented (dictionaries, try/catch, async,
 modules, first-class functions) is rejected with a "not implemented yet"
 compile error rather than silently misbehaving.
 
@@ -117,3 +117,30 @@ allocated (see [MEMORY.md](MEMORY.md)). Memory is otherwise fully automatic.
 
 ## Runtime errors
 Printed as `RuntimeError: <message>` with `at file.sn:line:col`, exit code 1.
+
+## Classes
+
+```
+class Entity:
+    var hp = 10
+    private var secret = 1
+    fn onCreation(hp: Int = 10):
+        self.hp = hp
+    fn describe():
+        return f"entity {hp}"
+
+class Goblin extends Entity:
+    fn describe():                      # override
+        return "goblin " + super.describe()
+
+var g = Goblin(5)
+print(g.describe())
+```
+
+- Single inheritance; fields and methods are inherited; `private` members are only visible inside the declaring class.
+- `onCreation` is the constructor. A parent `onCreation` that takes no required arguments runs automatically first; otherwise call `super.onCreation(...)` explicitly.
+- Bare field/method names work inside methods; `self.x` disambiguates. `super.m()` calls the parent version.
+- Overrides must keep parameter count, visibility and return type. Calls dispatch on the real object type.
+- Objects compare by identity (`==`, `!=`); a subclass can be used wherever its parent is expected; `filter(ClassName)` selects instances of a class from a list.
+- `toString()` (no params, returns String) customises `print` and f-strings.
+- Objects are garbage collected. Classes must be declared at module level.
