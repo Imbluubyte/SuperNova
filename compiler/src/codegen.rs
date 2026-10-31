@@ -14,6 +14,7 @@ use crate::lexer::{CompileError, Span};
 use std::collections::HashMap;
 
 mod classes;
+mod dicts;
 mod collections;
 
 thread_local! {
@@ -46,6 +47,8 @@ enum Ty {
     Any,
     /// Reference type; compound types are interned by leaking (compiler is short-lived).
     List(&'static Ty),
+    /// Insertion-ordered hash map; keys are Int, String or Bool.
+    Dict(&'static Ty, &'static Ty),
     Tuple(&'static [Ty]),
     /// Instance of a user class (index into `Gen::classes`); a reference to a heap object.
     Class(u32),
@@ -63,6 +66,7 @@ impl Ty {
             Ty::Any => "Any".into(),
             Ty::Class(c) => CLASS_NAMES.with(|n| n.borrow()[c as usize].clone()),
             Ty::List(e) => format!("List[{}]", e.name()),
+            Ty::Dict(k, v) => format!("Dict[{}, {}]", k.name(), v.name()),
             Ty::Tuple(items) => format!(
                 "Tuple[{}]",
                 items.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
@@ -77,7 +81,7 @@ impl Ty {
     fn has_ptrs(self) -> bool {
         match self {
             Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void => false,
-            Ty::Str | Ty::Any | Ty::List(_) | Ty::Class(_) => true,
+            Ty::Str | Ty::Any | Ty::List(_) | Ty::Dict(..) | Ty::Class(_) => true,
             Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
         }
     }
@@ -87,6 +91,9 @@ impl Ty {
     }
     fn list_of(elem: Ty) -> Ty {
         Ty::List(Box::leak(Box::new(elem)))
+    }
+    fn dict_of(k: Ty, v: Ty) -> Ty {
+        Ty::Dict(Box::leak(Box::new(k)), Box::leak(Box::new(v)))
     }
     fn tuple_of(items: Vec<Ty>) -> Ty {
         Ty::Tuple(Box::leak(items.into_boxed_slice()))
@@ -434,6 +441,16 @@ impl<'a> Gen<'a> {
                 },
             },
             TypeExpr::List(inner) => Ok(Ty::list_of(self.resolve_type(inner, span)?)),
+            TypeExpr::Dict(k, v) => {
+                let kt = self.resolve_type(k, span)?;
+                if !matches!(kt, Ty::Int | Ty::Str | Ty::Bool) {
+                    return err(
+                        format!("dictionary keys must be Int, String or Bool, not {}", kt.name()),
+                        span,
+                    );
+                }
+                Ok(Ty::dict_of(kt, self.resolve_type(v, span)?))
+            }
             TypeExpr::Tuple(items) => {
                 let mut v = Vec::new();
                 for t in items {
@@ -826,7 +843,7 @@ impl<'a> Gen<'a> {
                     ("str", Ty::Float) => (format!("sn_float_to_str({})", v.c), Ty::Str),
                     ("str", Ty::Bool) => (format!("sn_bool_to_str({})", v.c), Ty::Str),
                     ("str", Ty::Null) => (format!("sn_null_to_str({})", v.c), Ty::Str),
-                    ("str", Ty::Any) | ("str", Ty::List(_)) | ("str", Ty::Tuple(_)) | ("str", Ty::Class(_)) => {
+                    ("str", Ty::Any) | ("str", Ty::List(_)) | ("str", Ty::Dict(..)) | ("str", Ty::Tuple(_)) | ("str", Ty::Class(_)) => {
                         (self.to_str(&v), Ty::Str)
                     }
                     ("int", Ty::Int) => (v.c, Ty::Int),
@@ -889,7 +906,7 @@ impl<'a> Gen<'a> {
             ExprKind::Call(callee, args) => self.call(callee, args, e.span),
             ExprKind::Await(_) => nyi("await", e.span),
             ExprKind::List(items) => self.list_literal(items, None, e.span),
-            ExprKind::Dict(_) => nyi("dictionaries", e.span),
+            ExprKind::Dict(items) => self.dict_literal(items, None, e.span),
             ExprKind::Tuple(items) => self.tuple_literal(items, e.span),
             ExprKind::Index(base, idx) => self.index_expr(base, idx, e.span),
             ExprKind::Member(obj, name) => self.member_expr(obj, name, e.span),
@@ -933,6 +950,9 @@ impl<'a> Gen<'a> {
         let pure = l.pure && r.pure;
         let loc = self.loc(span);
         let (lt, rt) = (l.ty, r.ty);
+        if matches!(lt, Ty::Dict(..)) || matches!(rt, Ty::Dict(..)) {
+            return err("dictionaries cannot be used with this operator or compared with ==", span);
+        }
         if matches!(lt, Ty::List(_)) || matches!(rt, Ty::List(_)) {
             return self.list_binary(op, l, r, span);
         }

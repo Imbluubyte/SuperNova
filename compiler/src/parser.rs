@@ -274,6 +274,12 @@ impl Parser {
             let inner = self.type_expr()?;
             self.expect(&Tok::RBracket, "']'")?;
             TypeExpr::List(Box::new(inner))
+        } else if name == "Dict" && self.eat(&Tok::LBracket) {
+            let k = self.type_expr()?;
+            self.expect(&Tok::Comma, "',' between the key and value types")?;
+            let v = self.type_expr()?;
+            self.expect(&Tok::RBracket, "']'")?;
+            TypeExpr::Dict(Box::new(k), Box::new(v))
         } else if name == "Tuple" && self.eat(&Tok::LBracket) {
             let mut items = vec![self.type_expr()?];
             while self.eat(&Tok::Comma) {

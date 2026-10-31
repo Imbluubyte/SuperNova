@@ -325,4 +325,77 @@ static inline void N##_sort(N *l) { qsort(l->data, (size_t)l->len, sizeof(T), N#
 static int N##_cmp(const void *a, const void *b) { return sn_str_cmp(*(SnStr *const *)a, *(SnStr *const *)b); } \
 static inline void N##_sort(N *l) { qsort(l->data, (size_t)l->len, sizeof(SnStr *), N##_cmp); }
 
+/* ---------- dictionaries: insertion-ordered open-addressing hash maps ---------- */
+
+static inline uint64_t sn_hash_int(int64_t x) {
+    uint64_t z = (uint64_t)x + 0x9e3779b97f4a7c15ULL;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+static inline uint64_t sn_hash_bool(bool b) { return b ? 0x51ULL : 0xa3ULL; }
+static inline uint64_t sn_hash_str(SnStr *s) {
+    uint64_t h = 1469598103934665603ULL;
+    for (int64_t i = 0; i < s->len; i++) { h ^= (unsigned char)s->data[i]; h *= 1099511628211ULL; }
+    return h ^ (h >> 29);
+}
+static inline bool sn_keq_int(int64_t a, int64_t b) { return a == b; }
+static inline bool sn_keq_bool(bool a, bool b) { return a == b; }
+static inline bool sn_keq_str(SnStr *a, SnStr *b) { return sn_str_eq(a, b); }
+
+SN_COLD static void sn_kfail_int(const char *loc, int64_t k) { sn_panic(loc, "key %" PRId64 " is not in the dictionary", k); }
+SN_COLD static void sn_kfail_bool(const char *loc, bool k) { sn_panic(loc, "key %s is not in the dictionary", k ? "true" : "false"); }
+SN_COLD static void sn_kfail_str(const char *loc, SnStr *k) { sn_panic(loc, "key \"%s\" is not in the dictionary", k->data); }
+
+/* Entries are kept in insertion order; `tab` maps hashes to entry index + 1
+   (0 = empty slot, -1 = deleted). Removed entries are zeroed and skipped. */
+#define SN_DEFINE_DICT(N, K, V, ATOMIC, HASH, KEQ, KFAIL) \
+typedef struct N##_e { K k; V v; uint64_t h; bool live; } N##_e; \
+typedef struct N { int64_t count, used, cap, tcap; N##_e *ent; int64_t *tab; } N; \
+static inline void N##_alloc(N *d, int64_t cap) { \
+    int64_t tc = 8; while (tc < cap * 2) tc <<= 1; \
+    N##_e *e = (N##_e *)sn_gc_alloc(sizeof(N##_e) * (size_t)cap, ATOMIC); \
+    int64_t *t = (int64_t *)sn_gc_alloc(sizeof(int64_t) * (size_t)tc, 1); \
+    memset(t, 0, sizeof(int64_t) * (size_t)tc); \
+    d->ent = e; d->tab = t; d->cap = cap; d->tcap = tc; } \
+static inline N *N##_new(int64_t cap) { \
+    N *d = (N *)sn_gc_alloc(sizeof(N), 0); if (cap < 4) cap = 4; \
+    d->count = d->used = 0; N##_alloc(d, cap); return d; } \
+static inline int64_t N##_slot(N *d, K k, uint64_t h) { \
+    uint64_t m = (uint64_t)d->tcap - 1, i = h & m; \
+    for (;;) { int64_t s = d->tab[i]; if (s == 0) return -1; \
+        if (s > 0) { N##_e *e = &d->ent[s - 1]; if (e->h == h && KEQ(e->k, k)) return (int64_t)i; } \
+        i = (i + 1) & m; } } \
+static inline void N##_rebuild(N *d, int64_t cap) { \
+    N##_e *oe = d->ent; int64_t *ot = d->tab; int64_t n = d->used; \
+    N##_alloc(d, cap); d->used = 0; \
+    for (int64_t j = 0; j < n; j++) { if (!oe[j].live) continue; \
+        uint64_t m = (uint64_t)d->tcap - 1, i = oe[j].h & m; \
+        while (d->tab[i] != 0) i = (i + 1) & m; \
+        d->ent[d->used] = oe[j]; d->tab[i] = d->used + 1; d->used++; } \
+    sn_gc_free(oe); sn_gc_free(ot); } \
+static inline void N##_put(N *d, K k, V v) { \
+    uint64_t h = HASH(k); int64_t s = N##_slot(d, k, h); \
+    if (s >= 0) { d->ent[d->tab[s] - 1].v = v; return; } \
+    if (d->used == d->cap) N##_rebuild(d, d->count * 2 >= d->cap ? d->cap * 2 : d->cap); \
+    uint64_t m = (uint64_t)d->tcap - 1, i = h & m; \
+    while (d->tab[i] > 0) i = (i + 1) & m; \
+    N##_e *e = &d->ent[d->used]; e->k = k; e->v = v; e->h = h; e->live = true; \
+    d->tab[i] = d->used + 1; d->used++; d->count++; } \
+static inline V *N##_at(N *d, K k, const char *loc) { \
+    int64_t s = N##_slot(d, k, HASH(k)); if (s < 0) KFAIL(loc, k); \
+    return &d->ent[d->tab[s] - 1].v; } \
+static inline V N##_getor(N *d, K k, V def) { \
+    int64_t s = N##_slot(d, k, HASH(k)); return s < 0 ? def : d->ent[d->tab[s] - 1].v; } \
+static inline bool N##_has(N *d, K k) { return N##_slot(d, k, HASH(k)) >= 0; } \
+static inline void N##_remove(N *d, K k) { \
+    int64_t s = N##_slot(d, k, HASH(k)); if (s < 0) return; \
+    memset(&d->ent[d->tab[s] - 1], 0, sizeof(N##_e)); d->tab[s] = -1; d->count--; } \
+static inline void N##_clear(N *d) { \
+    memset(d->ent, 0, sizeof(N##_e) * (size_t)d->used); \
+    memset(d->tab, 0, sizeof(int64_t) * (size_t)d->tcap); d->count = d->used = 0; } \
+static inline void N##_merge(N *d, N *o) { \
+    int64_t n = o->used; \
+    for (int64_t i = 0; i < n && i < o->used; i++) if (o->ent[i].live) N##_put(d, o->ent[i].k, o->ent[i].v); }
+
 #endif /* SNRT_H */

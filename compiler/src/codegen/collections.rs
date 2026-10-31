@@ -45,13 +45,13 @@ impl<'a> Gen<'a> {
             Ty::Void => "void".into(),
             Ty::Any => "SnVal".into(),
             Ty::Class(c) => format!("SnO_{}*", c),
-            Ty::List(_) => format!("{}*", self.type_name(t)),
+            Ty::List(_) | Ty::Dict(..) => format!("{}*", self.type_name(t)),
             Ty::Tuple(_) => self.type_name(t),
         }
     }
 
     /// Name of the generated C struct for a list or tuple type.
-    fn type_name(&mut self, t: Ty) -> String {
+    pub(super) fn type_name(&mut self, t: Ty) -> String {
         if let Some(n) = self.types.get(&t) {
             return n.clone();
         }
@@ -77,6 +77,7 @@ impl<'a> Gen<'a> {
                 self.types.insert(t, name.clone());
                 name
             }
+            Ty::Dict(kt, vt) => self.dict_type_name(*kt, *vt),
             Ty::Tuple(items) => {
                 let mut fields = String::new();
                 for (i, it) in items.iter().enumerate() {
@@ -100,10 +101,13 @@ impl<'a> Gen<'a> {
         if let (ExprKind::List(items), Some(Ty::List(inner))) = (&e.kind, hint) {
             return self.list_literal(items, Some(*inner), e.span);
         }
+        if let (ExprKind::Dict(items), Some(Ty::Dict(kt, vt))) = (&e.kind, hint) {
+            return self.dict_literal(items, Some((*kt, *vt)), e.span);
+        }
         self.val(e)
     }
 
-    fn unify_elems(&self, es: &[E], span: Span) -> R<Ty> {
+    pub(super) fn unify_elems(&self, es: &[E], span: Span) -> R<Ty> {
         let first = es[0].ty;
         if es.iter().all(|e| e.ty == first) {
             return Ok(first);
@@ -225,6 +229,7 @@ impl<'a> Gen<'a> {
                 // not order-independent (a call elsewhere in the expression could change it).
                 Ok(E::new(c, *elem, false))
             }
+            Ty::Dict(..) => self.dict_index(b, idx, span),
             Ty::Tuple(items) => match &idx.kind {
                 ExprKind::Int(n) => {
                     if *n < 1 || *n as usize > items.len() {
@@ -268,6 +273,9 @@ impl<'a> Gen<'a> {
             return err("this expression cannot be assigned to", span);
         };
         let b = self.val(bx)?;
+        if let Ty::Dict(kt, vt) = b.ty {
+            return self.dict_assign(b, (*kt, *vt), ix, op, value, span);
+        }
         let elem = match b.ty {
             Ty::List(e) => *e,
             Ty::Tuple(_) => return err("tuples are immutable; build a new tuple instead", span),
@@ -371,7 +379,11 @@ impl<'a> Gen<'a> {
 
     /// `for x in some_list:`
     pub(super) fn for_each(&mut self, var: &str, iter: &Expr, body: &[Stmt]) -> R<()> {
-        let l = self.val(iter)?;
+        let mut l = self.val(iter)?;
+        if let Ty::Dict(..) = l.ty {
+            // Iterating a dictionary visits its keys (a snapshot, so the body may modify it).
+            l = self.dict_keys(l);
+        }
         let Ty::List(elem) = l.ty else {
             return err(
                 format!("cannot iterate over a value of type {}; use a range or a list", l.ty.name()),
@@ -419,6 +431,9 @@ impl<'a> Gen<'a> {
         let o = self.val(obj)?;
         if let Ty::Class(c) = o.ty {
             return self.call_method(o, c as usize, name, args, span, false);
+        }
+        if let Ty::Dict(kt, vt) = o.ty {
+            return self.dict_method(o, (*kt, *vt), name, args, span);
         }
         let Ty::List(elem_ref) = o.ty else {
             return err(format!("{} has no method '{}'", o.ty.name(), name), span);
@@ -837,7 +852,7 @@ impl<'a> Gen<'a> {
                     format!("sn_buf_val_repr(&{}, {}); ", b, c)
                 }
             }
-            Ty::List(_) | Ty::Tuple(_) => {
+            Ty::List(_) | Ty::Dict(..) | Ty::Tuple(_) => {
                 let f = self.fmt_fn(ty);
                 format!("{}(&{}, {}); ", f, b, c)
             }
@@ -878,6 +893,18 @@ impl<'a> Gen<'a> {
                     format!(
                         "sn_buf_text(b, \"[\", 1); for (int64_t i = 0; i < l->len; i++) {{ if (i) sn_buf_text(b, \", \", 2); {} }} sn_buf_text(b, \"]\", 1);",
                         inner
+                    ),
+                )
+            }
+            Ty::Dict(kt, vt) => {
+                let dn = self.type_name(t);
+                let kc = self.buf_append("(*b)", "e->k", *kt, false);
+                let vc = self.buf_append("(*b)", "e->v", *vt, false);
+                (
+                    format!("SnBuf *b, {} *d", dn),
+                    format!(
+                        "sn_buf_text(b, \"{{\", 1); int64_t n = 0; for (int64_t i = 0; i < d->used; i++) {{ {dn}_e *e = &d->ent[i]; if (!e->live) continue; if (n++) sn_buf_text(b, \", \", 2); {kc} sn_buf_text(b, \": \", 2); {vc} }} sn_buf_text(b, \"}}\", 1);",
+                        dn = dn, kc = kc, vc = vc
                     ),
                 )
             }

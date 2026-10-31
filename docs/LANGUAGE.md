@@ -1,7 +1,7 @@
 # SuperNova language reference (implemented subset)
 
 Everything here is implemented and covered by tests in `tests/`. Syntax that
-parses but is not yet implemented (dictionaries, try/catch, async,
+parses but is not yet implemented (try/catch, async,
 modules, first-class functions) is rejected with a "not implemented yet"
 compile error rather than silently misbehaving.
 
@@ -144,3 +144,21 @@ print(g.describe())
 - Objects compare by identity (`==`, `!=`); a subclass can be used wherever its parent is expected; `filter(ClassName)` selects instances of a class from a list.
 - `toString()` (no params, returns String) customises `print` and f-strings.
 - Objects are garbage collected. Classes must be declared at module level.
+
+## Dictionaries
+
+```
+var ages = {"ada": 36, "bob": 41}
+ages["cy"] = 29              # insert or overwrite
+ages["bob"] += 1             # the key must already exist
+print(ages["ada"])           # a missing key is a runtime error
+var counts: Dict[String, Int] = {}     # empty dictionaries need an annotation
+for name in ages:            # iterates keys, in insertion order
+    print(name, ages[name])
+```
+
+- Keys are `Int`, `String` or `Bool`; values can be any type (mixed values become `Any`, like mixed lists).
+- Insertion-ordered; reference semantics (like lists); printed as `{"a": 1}`.
+- Methods: `length()`, `keys()`, `values()`, `contains(key)`, `get(key, default)`, `remove(key)` (no-op if absent), `merge(other)`, `clear()`.
+- Iterating takes a snapshot of the keys, so the loop body may add or remove entries.
+- Dictionaries cannot be compared with `==`.
