@@ -2,7 +2,7 @@
 
 Everything here is implemented and covered by tests in `tests/`. Syntax that
 parses but is not yet implemented (try/catch, async,
-modules, first-class functions) is rejected with a "not implemented yet"
+first-class functions) is rejected with a "not implemented yet"
 compile error rather than silently misbehaving.
 
 ## Basics
@@ -162,3 +162,29 @@ for name in ages:            # iterates keys, in insertion order
 - Methods: `length()`, `keys()`, `values()`, `contains(key)`, `get(key, default)`, `remove(key)` (no-op if absent), `merge(other)`, `clear()`.
 - Iterating takes a snapshot of the keys, so the loop body may add or remove entries.
 - Dictionaries cannot be compared with `==`.
+
+## Modules
+
+```
+# utils/mathx.sn
+const PI = 3.14159
+private var calls = 0          # not visible to importers
+fn square(x):
+    calls += 1
+    return x * x
+
+# main.sn
+use utils.mathx                # loads utils/mathx.sn; namespace is `mathx`
+use game.shapes as sh          # `as` picks another namespace
+print(mathx.square(3), mathx.PI)
+var c = sh.Circle(1.0)         # classes, functions and variables are all reachable
+var s: sh.Shape = c            # ...including in type annotations and `extends sh.Shape`
+```
+
+- `use a.b` loads `a/b.sn` relative to the folder of the file you compile, then each folder in `$SN_PATH` (colon separated).
+- A file's top-level code runs once, before the code of any file that imports it. Files are loaded once, however often they are imported.
+- Everything is reached through the namespace (`mathx.square`); there is no `from ... import`. Variables of another module can be read and assigned (`mathx.counter = 0`).
+- `private` on a top-level `var`, `const`, `fn` or `class` hides it from importing files (compile error). Class-level `private` is separate and works as described under Classes.
+- Circular imports, unknown modules/members and a module name that clashes with a top-level name are compile errors. Errors point at the right file and line.
+- A local variable or parameter named like a module shadows it.
+- `use` must be at the top level of a file.

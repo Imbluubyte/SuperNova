@@ -6,8 +6,8 @@
 - [x] 4. C emitter + runtime: control flow, functions, strings
 - [x] 5. Classes and inheritance (single inheritance, onCreation, super, private, virtual dispatch)
 - [x] 6a. Lists, tuples, mixed lists, filter, elementwise arithmetic
-- [ ] 6b. Dictionaries
-- [ ] 7. Modules and `private`
+- [x] 6b. Dictionaries
+- [x] 7. Modules and `private`
 - [x] 8a. Garbage collector, stack-overflow and out-of-memory handling (docs/MEMORY.md)
 - [ ] 8b. Errors (try/catch/finally)
 - [ ] 9. async/await

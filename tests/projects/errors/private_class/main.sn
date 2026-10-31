@@ -1,0 +1,2 @@
+use lib
+var h = lib.Hidden()

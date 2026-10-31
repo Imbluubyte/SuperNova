@@ -182,3 +182,50 @@ fn cheat_sheet_examples_compile_and_run() {
     let out = snc().arg("run").arg(&f).output().unwrap();
     assert!(out.status.success(), "cheat sheet examples failed:\n{}", String::from_utf8_lossy(&out.stderr));
 }
+
+#[test]
+fn multi_file_projects_run_with_expected_output() {
+    let base = root().join("projects");
+    let mut n = 0;
+    for entry in std::fs::read_dir(&base).unwrap() {
+        let dir = entry.unwrap().path();
+        let main = dir.join("main.sn");
+        if !main.is_file() {
+            continue;
+        }
+        n += 1;
+        let want = std::fs::read_to_string(dir.join("expected.out")).unwrap();
+        let out = snc().arg("run").arg(&main).output().unwrap();
+        assert!(out.status.success(), "{}: {}", dir.display(), String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{}", dir.display());
+        // Every collection must also be safe: run with a collection on each allocation.
+        let bin = std::env::temp_dir().join(format!("snc-proj-{}", dir.file_name().unwrap().to_string_lossy()));
+        let b = snc().arg("build").arg(&main).arg("-o").arg(&bin).output().unwrap();
+        assert!(b.status.success());
+        let st = Command::new(&bin).env("SN_GC_STRESS", "1").output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&st.stdout), want, "{} (GC stress)", dir.display());
+    }
+    assert!(n > 0);
+}
+
+#[test]
+fn module_errors_are_rejected_with_a_clear_error() {
+    let base = root().join("projects").join("errors");
+    let mut n = 0;
+    for entry in std::fs::read_dir(&base).unwrap() {
+        let dir = entry.unwrap().path();
+        let want = std::fs::read_to_string(dir.join("expected.err")).unwrap();
+        let out = snc().arg("check").arg(dir.join("main.sn")).output().unwrap();
+        assert!(!out.status.success(), "{} should not compile", dir.display());
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(want.trim()),
+            "{}: expected error containing {:?}, got:\n{}",
+            dir.display(),
+            want.trim(),
+            stderr
+        );
+        n += 1;
+    }
+    assert!(n >= 10);
+}

@@ -863,7 +863,7 @@ impl<'a> Gen<'a> {
                     .map_or(false, |(_, d)| d.params.is_empty() && !d.is_private);
                 let call = if has_to_string {
                     let recv = E::new(c.to_string(), ty, true);
-                    let sp = Span { line: 0, col: 0 };
+                    let sp = Span { line: 0, col: 0, file: 0 };
                     self.call_method(recv, k, "toString", &[], sp, false).ok().filter(|e| e.ty == Ty::Str)
                 } else {
                     None
@@ -871,7 +871,7 @@ impl<'a> Gen<'a> {
                 match call {
                     Some(e) => format!("sn_buf_str(&{}, {}); ", b, e.c),
                     None => {
-                        let text = format!("<{}>", self.classes[k].name);
+                        let text = format!("<{}>", crate::modules::bare_name(&self.classes[k].name));
                         format!("sn_buf_text(&{}, \"{}\", {}); ", b, text, text.len())
                     }
                 }

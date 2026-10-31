@@ -195,7 +195,7 @@ impl Ctx {
 const BUILTINS: [&str; 6] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes"];
 
 struct Gen<'a> {
-    file: String,
+    files: Vec<String>,
     fns: HashMap<String, &'a FnDecl>,
     fn_order: Vec<&'a FnDecl>,
     globals: HashMap<String, Var>,
@@ -221,9 +221,9 @@ struct Gen<'a> {
     class_structs: String,
 }
 
-pub fn generate<'a>(module: &'a Module, file: &str) -> R<String> {
+pub fn generate<'a>(module: &'a Module, files: &[String]) -> R<String> {
     let mut g = Gen {
-        file: file.to_string(),
+        files: files.to_vec(),
         fns: HashMap::new(),
         fn_order: Vec::new(),
         globals: HashMap::new(),
@@ -394,7 +394,7 @@ impl<'a> Gen<'a> {
     // ---------------- helpers ----------------
 
     fn loc(&self, span: Span) -> String {
-        format!("\"{}:{}:{}\"", c_escape(&self.file), span.line, span.col)
+        format!("\"{}:{}:{}\"", c_escape(&self.files[span.file as usize]), span.line, span.col)
     }
 
     fn line(&mut self, s: &str) {
@@ -1404,7 +1404,7 @@ impl<'a> Gen<'a> {
             ),
             StmtKind::Try { .. } => nyi("try/catch/finally", s.span),
             StmtKind::Throw(_) => nyi("throw", s.span),
-            StmtKind::Use { .. } => nyi("modules ('use')", s.span),
+            StmtKind::Use { .. } => err("'use' must be at the top level of a file", s.span),
             StmtKind::Manages(_) => nyi("'manages'", s.span),
         }
     }

@@ -1,0 +1,3 @@
+use lib
+var t = lib.Thing()
+var n: Int = t

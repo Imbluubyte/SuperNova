@@ -1,12 +1,17 @@
 //! Recursive-descent parser with precedence climbing for expressions.
 
 use crate::ast::*;
-use crate::lexer::{lex, CompileError, FPart, Span, Tok, Token};
+use crate::lexer::{lex_file, CompileError, FPart, Span, Tok, Token};
 
 type PResult<T> = Result<T, CompileError>;
 
+#[allow(dead_code)]
 pub fn parse(src: &str) -> PResult<Module> {
-    let toks = lex(src)?;
+    parse_file(src, 0)
+}
+
+pub fn parse_file(src: &str, file: u16) -> PResult<Module> {
+    let toks = lex_file(src, file)?;
     let mut p = Parser { toks, pos: 0 };
     let mut items = Vec::new();
     p.skip_newlines();
@@ -18,7 +23,7 @@ pub fn parse(src: &str) -> PResult<Module> {
 }
 
 fn parse_expr_str(src: &str, span: Span) -> PResult<Expr> {
-    let toks = lex(src).map_err(|e| CompileError::new(e.msg, span))?;
+    let toks = lex_file(src, span.file).map_err(|e| CompileError::new(e.msg, span))?;
     let mut p = Parser { toks, pos: 0 };
     let e = p.expr().map_err(|e| CompileError::new(e.msg, span))?;
     p.skip_newlines();
@@ -288,12 +293,29 @@ impl Parser {
             self.expect(&Tok::RBracket, "']'")?;
             TypeExpr::Tuple(items)
         } else {
+            let mut name = name;
+            while self.at(&Tok::Dot) {
+                self.bump();
+                name.push('.');
+                name.push_str(&self.ident("a type name after '.'")?);
+            }
             TypeExpr::Named(name)
         };
         if self.eat(&Tok::Question) {
             t = TypeExpr::Optional(Box::new(t));
         }
         Ok(t)
+    }
+
+    /// `name` or `module.name`.
+    fn dotted_name(&mut self, what: &str) -> PResult<String> {
+        let mut n = self.ident(what)?;
+        while self.at(&Tok::Dot) {
+            self.bump();
+            n.push('.');
+            n.push_str(&self.ident("a name after '.'")?);
+        }
+        Ok(n)
     }
 
     fn fn_decl(&mut self) -> PResult<FnDecl> {
@@ -335,7 +357,7 @@ impl Parser {
         let span = self.span();
         self.expect(&Tok::Class, "'class'")?;
         let name = self.ident("a class name")?;
-        let parent = if self.eat(&Tok::Extends) { Some(self.ident("a parent class")?) } else { None };
+        let parent = if self.eat(&Tok::Extends) { Some(self.dotted_name("a parent class")?) } else { None };
         if self.at(&Tok::Comma) {
             return Err(CompileError::new(
                 "classes support single inheritance only",

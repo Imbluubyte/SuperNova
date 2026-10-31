@@ -121,10 +121,19 @@ Implemented in `runtime/sngc.h`; full description in [MEMORY.md](MEMORY.md).
 
 ### 2.8 Modules
 
-* One file = one module. `use a.b` resolves `a/b.sn` relative to the project
-  root, then the standard library path. Whole program is compiled together
-  (whole-program optimisation, dead-code elimination of unused functions).
-* `private` is enforced at compile time at module (and later class) level.
+* One file = one module. `use a.b` resolves `a/b.sn` relative to the folder of the
+  entry file, then `$SN_PATH`. The whole program is compiled together.
+* Implemented as a *linking pass over the AST* (`compiler/src/modules.rs`): each
+  imported file's top-level names get a unique prefix (`m1_mathx__square`), every
+  reference inside it is rewritten (respecting locals, parameters and bare
+  field names inside methods), and `alias.name` in an importer is rewritten to
+  the target's prefixed name or rejected if it is `private`/missing. Files are
+  concatenated in dependency order, so the type checker and C backend have no
+  notion of modules and `private` costs nothing at run time.
+* Why not teach the type checker about namespaces? A rewriting pass keeps the
+  (already large) checker unchanged and makes name clashes impossible by
+  construction. Messages are mapped back (`m1_mathx__square` -> `mathx.square`).
+* `Span` carries a file index so errors and runtime panics name the right file.
 
 ### 2.9 Nebula separation
 

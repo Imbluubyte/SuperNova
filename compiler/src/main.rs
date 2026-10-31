@@ -10,6 +10,7 @@
 mod ast;
 mod codegen;
 mod lexer;
+mod modules;
 mod parser;
 
 use std::path::{Path, PathBuf};
@@ -25,8 +26,10 @@ fn usage() -> ! {
     exit(2);
 }
 
-fn report(path: &str, src: &str, e: &lexer::CompileError) -> ! {
-    eprintln!("{}:{}:{}: error: {}", path, e.span.line, e.span.col, e.msg);
+fn report(files: &[modules::SrcFile], e: &lexer::CompileError) -> ! {
+    let f = files.get(e.span.file as usize).or(files.first());
+    let (name, src) = f.map(|f| (f.display.as_str(), f.src.as_str())).unwrap_or(("?", ""));
+    eprintln!("{}:{}:{}: error: {}", name, e.span.line, e.span.col, modules::unmangle(&e.msg));
     if let Some(l) = src.lines().nth((e.span.line as usize).saturating_sub(1)) {
         eprintln!("    {}", l);
         eprintln!("    {}^", " ".repeat((e.span.col as usize).saturating_sub(1)));
@@ -35,24 +38,14 @@ fn report(path: &str, src: &str, e: &lexer::CompileError) -> ! {
 }
 
 fn compile_to_c(path: &str) -> String {
-    let src = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: cannot read {}: {}", path, e);
-            exit(1);
-        }
+    let prog = match modules::load(path) {
+        Ok(p) => p,
+        Err((e, files)) => report(&files, &e),
     };
-    let module = match parser::parse(&src) {
-        Ok(m) => m,
-        Err(e) => report(path, &src, &e),
-    };
-    let file = Path::new(path)
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string());
-    match codegen::generate(&module, &file) {
+    let names: Vec<String> = prog.files.iter().map(|f| f.display.clone()).collect();
+    match codegen::generate(&prog.module, &names) {
         Ok(c) => c,
-        Err(e) => report(path, &src, &e),
+        Err(e) => report(&prog.files, &e),
     }
 }
 

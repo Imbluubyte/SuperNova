@@ -1,0 +1,29 @@
+use utils.mathx
+use game.shapes as sh
+
+print("main start")
+print(mathx.square(7), mathx.square(2.5))
+print(mathx.PI, mathx.area(2.0))
+print(mathx.reveal(), mathx.callCount())
+mathx.calls = 100
+print(mathx.callCount())
+
+var c = sh.Circle(1.0)
+print(c.describe())
+var d: sh.Shape = sh.make(2.0)
+print(d.describe(), d.name)
+print(sh.name)
+var shapes: List[sh.Shape] = [c, d, sh.Shape("blob")]
+for s in shapes:
+    print(s.describe())
+print(c)
+
+# a local named like an imported module shadows it
+fn shadow(mathx: Int) -> Int:
+    return mathx + 1
+print(shadow(1))
+
+class Mine extends sh.Circle:
+    fn area() -> Float:
+        return super.area() * 2.0
+print(Mine(1.0).describe())

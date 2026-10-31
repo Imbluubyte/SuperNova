@@ -6,6 +6,8 @@ use std::fmt;
 pub struct Span {
     pub line: u32,
     pub col: u32,
+    /// Index of the source file (0 = the entry file).
+    pub file: u16,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -171,8 +173,15 @@ fn keyword(s: &str) -> Option<Tok> {
     })
 }
 
+#[allow(dead_code)]
 pub fn lex(src: &str) -> Result<Vec<Token>, CompileError> {
-    Lexer::new(src).run()
+    lex_file(src, 0)
+}
+
+pub fn lex_file(src: &str, file: u16) -> Result<Vec<Token>, CompileError> {
+    let mut l = Lexer::new(src);
+    l.file = file;
+    l.run()
 }
 
 struct Lexer<'a> {
@@ -184,6 +193,7 @@ struct Lexer<'a> {
     indents: Vec<usize>,
     out: Vec<Token>,
     at_line_start: bool,
+    file: u16,
     _src: &'a str,
 }
 
@@ -198,12 +208,13 @@ impl<'a> Lexer<'a> {
             indents: vec![0],
             out: Vec::new(),
             at_line_start: true,
+            file: 0,
             _src: src,
         }
     }
 
     fn span(&self) -> Span {
-        Span { line: self.line, col: self.col }
+        Span { line: self.line, col: self.col, file: self.file }
     }
 
     fn peek(&self) -> Option<char> {
