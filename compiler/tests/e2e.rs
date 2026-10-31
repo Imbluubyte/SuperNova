@@ -157,3 +157,28 @@ fn runtime_errors_in_collections_are_clear() {
         assert!(stderr.contains(".sn:"), "{} lacks a source location:\n{}", sn.display(), stderr);
     }
 }
+
+/// Every ```sn example in docs/CHEATSHEET.md must compile and run, so the
+/// cheat sheet cannot drift away from the implementation.
+#[test]
+fn cheat_sheet_examples_compile_and_run() {
+    let md = std::fs::read_to_string(root().join("..").join("docs").join("CHEATSHEET.md")).unwrap();
+    let mut program = String::new();
+    let mut blocks = 0;
+    let mut rest = md.as_str();
+    while let Some(start) = rest.find("```sn\n") {
+        let body = &rest[start + 6..];
+        let end = body.find("```").expect("unterminated code block");
+        program.push_str(&body[..end]);
+        program.push('\n');
+        blocks += 1;
+        rest = &body[end + 3..];
+    }
+    assert!(blocks >= 8, "found only {} example blocks", blocks);
+    let dir = std::env::temp_dir().join("snc-cheatsheet-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("cheatsheet.sn");
+    std::fs::write(&f, program).unwrap();
+    let out = snc().arg("run").arg(&f).output().unwrap();
+    assert!(out.status.success(), "cheat sheet examples failed:\n{}", String::from_utf8_lossy(&out.stderr));
+}
