@@ -1,4 +1,4 @@
 var total = 0
-for i in 1..500000000:
+for i in 1..50000000:
     total += i % 7
 print(total)

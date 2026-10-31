@@ -2,7 +2,7 @@
  *
  * Kept as one translation unit with the generated code so clang can inline
  * the small helpers. Plain C99 + GNU statement expressions (clang/gcc).
- * Memory: sn_alloc currently never frees (collector is on the roadmap). */
+ * Memory: all strings and lists live in the garbage-collected heap (sngc.h). */
 #ifndef SNRT_H
 #define SNRT_H
 
@@ -29,7 +29,11 @@ SN_COLD static void sn_panic(const char *loc, const char *fmt, ...) {
     exit(1);
 }
 
-static inline void *sn_alloc(size_t n) {
+#include "sngc.h"
+
+/* Plain malloc for runtime-internal scratch memory that is not part of the
+ * garbage-collected heap (e.g. string builders). */
+static inline void *sn_xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
     if (!p) sn_panic("<runtime>", "out of memory");
     return p;
@@ -43,7 +47,7 @@ typedef struct SnStr {
 } SnStr;
 
 static inline SnStr *sn_str_new(const char *s, int64_t len) {
-    SnStr *r = (SnStr *)sn_alloc(sizeof(SnStr) + (size_t)len + 1);
+    SnStr *r = (SnStr *)sn_gc_alloc(sizeof(SnStr) + (size_t)len + 1, 1);
     r->len = len;
     memcpy(r->data, s, (size_t)len);
     r->data[len] = 0;
@@ -51,7 +55,7 @@ static inline SnStr *sn_str_new(const char *s, int64_t len) {
 }
 
 static inline SnStr *sn_str_concat(SnStr *a, SnStr *b) {
-    SnStr *r = (SnStr *)sn_alloc(sizeof(SnStr) + (size_t)(a->len + b->len) + 1);
+    SnStr *r = (SnStr *)sn_gc_alloc(sizeof(SnStr) + (size_t)(a->len + b->len) + 1, 1);
     r->len = a->len + b->len;
     memcpy(r->data, a->data, (size_t)a->len);
     memcpy(r->data + a->len, b->data, (size_t)b->len);
@@ -80,7 +84,7 @@ typedef struct {
 static inline void sn_buf_init(SnBuf *b) {
     b->cap = 48;
     b->len = 0;
-    b->p = (char *)sn_alloc((size_t)b->cap);
+    b->p = (char *)sn_xmalloc((size_t)b->cap);
 }
 
 static inline void sn_buf_text(SnBuf *b, const char *s, int64_t n) {
@@ -280,14 +284,20 @@ SN_COLD static void sn_list_oob(const char *loc, int64_t i, int64_t len) {
     sn_panic(loc, "list index %" PRId64 " is out of range (length %" PRId64 "; indexes start at 1)", i, len);
 }
 
-#define SN_DEFINE_LIST(N, T) \
+/* ATOMIC = 1 when T holds no pointers, so the collector never scans the storage. */
+#define SN_DEFINE_LIST(N, T, ATOMIC) \
 typedef struct N { int64_t len, cap; T *data; } N; \
 static inline N *N##_new(int64_t cap) { \
-    N *l = (N *)sn_alloc(sizeof(N)); l->len = 0; l->cap = cap > 4 ? cap : 4; \
-    l->data = (T *)sn_alloc(sizeof(T) * (size_t)l->cap); return l; } \
+    N *l = (N *)sn_gc_alloc(sizeof(N), 0); \
+    if (cap < 4) cap = 4; \
+    T *d = (T *)sn_gc_alloc(sizeof(T) * (size_t)cap, ATOMIC); \
+    l->len = 0; l->cap = cap; l->data = d; return l; } \
 static inline void N##_push(N *l, T v) { \
-    if (l->len == l->cap) { l->cap *= 2; l->data = (T *)realloc(l->data, sizeof(T) * (size_t)l->cap); \
-        if (!l->data) sn_panic("<runtime>", "out of memory"); } \
+    if (l->len == l->cap) { \
+        int64_t nc = l->cap * 2; \
+        T *nd = (T *)sn_gc_alloc(sizeof(T) * (size_t)nc, ATOMIC); \
+        memcpy(nd, l->data, sizeof(T) * (size_t)l->len); \
+        sn_gc_free(l->data); l->data = nd; l->cap = nc; } \
     l->data[l->len++] = v; } \
 static inline T *N##_at(N *l, int64_t i, const char *loc) { \
     if (i < 1 || i > l->len) sn_list_oob(loc, i, l->len); return &l->data[i - 1]; } \

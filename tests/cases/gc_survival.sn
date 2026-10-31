@@ -1,0 +1,65 @@
+# Data reachable from variables must survive collections, whatever its shape.
+fn makeNames(n: Int) -> List[String]:
+    var out: List[String] = []
+    for i in 1..n:
+        out.add(f"name{i}")
+    return out
+
+fn nested():
+    var grid = [[1, 2], [3, 4]]
+    var words = [["a", "b"], ["c"]]
+    var mixed = [1, "two", 3.0, true, null]
+    var pairs = [(1, "x"), (2, "y")]
+    return grid, words, mixed, pairs
+
+fn churn(rounds: Int) -> Int:
+    var total = 0
+    for i in 1..rounds:
+        var junk = [i, i + 1, i + 2]
+        var text = f"junk number {i}"
+        total += junk.length()
+    return total
+
+var data = nested()
+var names = makeNames(50)
+var greeting = "hello" + " " + "world"
+var matrix = [[1.5, 2.5], [3.5]]
+gcCollect()
+churn(2000)
+gcCollect()
+print(data)
+print(names.length(), names[1], names[25], names[50])
+print(greeting, matrix)
+
+# Strings stored only inside a list that is being filled while garbage is produced.
+var kept: List[String] = []
+for i in 1..200:
+    var temp = [i, i, i]
+    kept.add(f"kept-{i}-{temp.length()}")
+gcCollect()
+var ok = true
+for i in 1..200:
+    if kept[i] != f"kept-{i}-3":
+        ok = false
+print(ok, kept.length())
+
+# Lists of lists built in a loop.
+var rows: List[List[Int]] = []
+for r in 1..30:
+    var row: List[Int] = []
+    for c in 1..10:
+        row.add(r * c)
+    rows.add(row)
+gcCollect()
+var checksum = 0
+for row in rows:
+    checksum += row.sum()
+print(checksum, rows[30][10])
+
+# Memory used by garbage is reclaimed.
+gcCollect()
+var before = gcHeapBytes()
+var junk_total = churn(100000)
+gcCollect()
+var after = gcHeapBytes()
+print(junk_total, after - before < 100000)

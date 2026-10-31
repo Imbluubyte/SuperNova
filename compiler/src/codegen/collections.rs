@@ -58,8 +58,12 @@ impl<'a> Gen<'a> {
             Ty::List(elem) => {
                 let ec = self.cty(*elem);
                 let name = format!("SnL{}", self.types.len());
-                self.type_decls
-                    .push_str(&format!("SN_DEFINE_LIST({}, {})\n", name, ec));
+                self.type_decls.push_str(&format!(
+                    "SN_DEFINE_LIST({}, {}, {})\n",
+                    name,
+                    ec,
+                    if elem.has_ptrs() { 0 } else { 1 }
+                ));
                 match *elem {
                     Ty::Int | Ty::Float => self
                         .type_decls

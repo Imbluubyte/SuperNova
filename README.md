@@ -7,10 +7,12 @@ native code (via C and clang) and is designed to build and run on Android/Termux
 strings, f-strings, lists (1-based, elementwise arithmetic, `filter`), tuples, control flow (`if/orif/else`, `while`, `for` over ranges,
 `match`), and functions (generic, recursive, default and named arguments) compile
 to native executables today. Classes, dictionaries, errors, async and modules are
-parsed or planned but not implemented yet. **Memory is not yet reclaimed** (no garbage collector); see [ROADMAP.md](ROADMAP.md).
+parsed or planned but not implemented yet. Memory is managed by a built-in garbage collector ([docs/MEMORY.md](docs/MEMORY.md)); see [ROADMAP.md](ROADMAP.md).
 
 * [Language reference](docs/LANGUAGE.md) (implemented subset)
 * [Architecture and design decisions](docs/ARCHITECTURE.md)
+* [Memory management and the garbage collector](docs/MEMORY.md)
+* [**Android / Termux guide**](docs/TERMUX.md)
 
 ```
 var name = "Player"
@@ -34,8 +36,9 @@ cargo test
 
 `snc` needs a C compiler at run time (`$CC`, else `clang`, `cc`, `gcc`).
 
-Termux: `pkg install rust clang git`, then the same commands. No crates are
-downloaded; the compiler has zero dependencies.
+Termux: see [docs/TERMUX.md](docs/TERMUX.md) (or run `scripts/termux-install.sh`). No crates are
+downloaded; the compiler has zero dependencies. After installing, `snc doctor` checks that
+everything works on your machine.
 
 ## Language decisions
 

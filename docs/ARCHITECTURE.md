@@ -73,21 +73,21 @@ are recorded here.
   reports an error asking for annotations.
 * Mixed-type collections use a tagged `Value` (see 2.5).
 
-### 2.4 Memory management: precise, non-moving mark-sweep (planned)
+### 2.4 Memory management: conservative-root, non-moving mark-sweep
 
-* Early stages: the runtime allocates through a single `sn_alloc` entry point and
-  does not yet free (programs are short-lived). All heap objects carry a header
-  so the collector can be added without changing generated code.
-* Target design: precise mark-and-sweep, non-moving, with per-size-class free
-  lists, lazy/incremental sweep, and a heap-growth trigger (collect when the
-  heap doubles since the last collection) to bound pause time. The compiler
-  emits a shadow stack of heap-typed locals as precise roots. Non-moving keeps
-  C interop (Nebula, Android NDK) simple.
-* Status: collector not implemented yet; tracked in the ROADMAP.
-* Value-typed data (Int, Float, Bool, tuples of primitives, numeric lists
-  elements) never touches the GC.
-* Rejected: reference counting (cycle leaks, atomic cost on ARM), tracing
-  copying GC (moves objects, complicates FFI and precise stack maps in C).
+Implemented in `runtime/sngc.h`; full description in [MEMORY.md](MEMORY.md).
+
+* Non-moving stop-the-world mark & sweep with size-class spans; the C stack and
+  registers are scanned conservatively and heap objects word by word, except
+  "atomic" objects (strings, numeric list storage), which are never scanned.
+* Why conservative roots: the compiler emits C, and a precise scheme (shadow stack
+  or stack maps) would tax every call and local variable. This keeps generated code
+  free of GC bookkeeping.
+* Value-typed data (Int, Float, Bool, tuples of primitives) never touches the GC.
+* Rejected: reference counting (cycle leaks, atomic cost on ARM), copying GC
+  (moves objects, complicates FFI and needs precise roots).
+* Later options if pauses matter for games: incremental marking, generational
+  collection with write barriers.
 
 ### 2.5 Value representation
 

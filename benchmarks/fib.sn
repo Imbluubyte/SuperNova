@@ -3,4 +3,4 @@ fn fib(n: Int) -> Int:
         return n
     return fib(n - 1) + fib(n - 2)
 
-print(fib(38))
+print(fib(35))

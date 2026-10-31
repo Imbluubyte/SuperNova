@@ -63,6 +63,15 @@ impl Ty {
     fn is_num(self) -> bool {
         matches!(self, Ty::Int | Ty::Float)
     }
+    /// Whether values of this type can contain heap pointers (the collector
+    /// never scans storage of pointer-free types).
+    fn has_ptrs(self) -> bool {
+        match self {
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void => false,
+            Ty::Str | Ty::Any | Ty::List(_) => true,
+            Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
+        }
+    }
     /// Types an `Any` can hold.
     fn is_scalar(self) -> bool {
         matches!(self, Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Null)
@@ -126,7 +135,7 @@ impl Ctx {
     }
 }
 
-const BUILTINS: [&str; 4] = ["print", "str", "int", "float"];
+const BUILTINS: [&str; 6] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes"];
 
 struct Gen<'a> {
     file: String,
@@ -146,6 +155,8 @@ struct Gen<'a> {
     type_decls: String,
     fmt_fns: HashMap<Ty, String>,
     fmt_decls: String,
+    /// Globals whose memory the collector must scan.
+    global_roots: Vec<String>,
 }
 
 pub fn generate<'a>(module: &'a Module, file: &str) -> R<String> {
@@ -166,6 +177,7 @@ pub fn generate<'a>(module: &'a Module, file: &str) -> R<String> {
         type_decls: String::new(),
         fmt_fns: HashMap::new(),
         fmt_decls: String::new(),
+        global_roots: Vec::new(),
     };
     g.run(module)
 }
@@ -297,7 +309,11 @@ impl<'a> Gen<'a> {
         out.push_str(&self.bodies);
         out.push_str("static void sn_main(void) {\n");
         out.push_str(&main_body);
-        out.push_str("}\n\nint main(void) {\n    sn_main();\n    return 0;\n}\n");
+        out.push_str("}\n\nint main(void) {\n    sn_gc_init(__builtin_frame_address(0));\n");
+        for g in &self.global_roots {
+            out.push_str(&format!("    sn_gc_root(&{0}, sizeof({0}));\n", g));
+        }
+        out.push_str("    sn_main();\n    return 0;\n}\n");
         Ok(out)
     }
 
@@ -652,6 +668,16 @@ impl<'a> Gen<'a> {
             return err(format!("'{}' does not accept named arguments", name), span);
         }
         match name {
+            "gcCollect" | "gcHeapBytes" => {
+                if !args.is_empty() {
+                    return err(format!("'{}' takes no arguments", name), span);
+                }
+                if name == "gcCollect" {
+                    Ok(E::new("({ sn_gc_collect(); })", Ty::Void, false))
+                } else {
+                    Ok(E::new("((int64_t)sn_gc_heap_bytes())", Ty::Int, false))
+                }
+            }
             "print" => {
                 let mut s = String::from("({ ");
                 for (i, a) in args.iter().enumerate() {
@@ -988,6 +1014,9 @@ impl<'a> Gen<'a> {
                     let cname = format!("g_{}", name);
                     let tc = self.cty(t);
                     self.global_decls.push_str(&format!("static {} {};\n", tc, cname));
+                    if t.has_ptrs() {
+                        self.global_roots.push(cname.clone());
+                    }
                     self.line(&format!("{} = {};", cname, c));
                     self.globals
                         .insert(name.clone(), Var { ty: t, is_const: *is_const, cname });

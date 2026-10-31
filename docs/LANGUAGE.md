@@ -112,6 +112,8 @@ print(position[1], position[2])     # 1-based
 ## Builtins
 `print(a, b, ...)` (space separated, newline terminated), `str(x)`, `int(x)`, `float(x)`.
 `int("12")`/`float("1.5")` parse strings and raise a runtime error on bad input.
+`gcCollect()` runs the garbage collector now; `gcHeapBytes()` returns the bytes currently
+allocated (see [MEMORY.md](MEMORY.md)). Memory is otherwise fully automatic.
 
 ## Runtime errors
 Printed as `RuntimeError: <message>` with `at file.sn:line:col`, exit code 1.
