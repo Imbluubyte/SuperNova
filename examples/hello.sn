@@ -7,3 +7,7 @@ fn fib(n: Int) -> Int:
     return fib(n - 1) + fib(n - 2)
 
 print(f"fib(20) = {fib(20)}")
+
+var scores = [3, 1, 2]
+scores.sort()
+print(scores, scores * 10, scores.filter(> 1))

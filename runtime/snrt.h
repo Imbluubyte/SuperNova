@@ -223,4 +223,96 @@ static inline double sn_str_to_float(SnStr *s, const char *loc) {
     return v;
 }
 
+
+/* ---------- Any: tagged value used by mixed-type lists ---------- */
+
+enum { SN_T_NULL, SN_T_INT, SN_T_FLOAT, SN_T_BOOL, SN_T_STR };
+
+typedef struct SnVal {
+    uint8_t tag;
+    union { int64_t i; double f; bool b; SnStr *s; } u;
+} SnVal;
+
+static inline SnVal sn_val_int(int64_t v) { SnVal r; r.tag = SN_T_INT; r.u.i = v; return r; }
+static inline SnVal sn_val_float(double v) { SnVal r; r.tag = SN_T_FLOAT; r.u.f = v; return r; }
+static inline SnVal sn_val_bool(bool v) { SnVal r; r.tag = SN_T_BOOL; r.u.b = v; return r; }
+static inline SnVal sn_val_str(SnStr *v) { SnVal r; r.tag = SN_T_STR; r.u.s = v; return r; }
+static inline SnVal sn_val_null(int8_t v) { (void)v; SnVal r; r.tag = SN_T_NULL; r.u.i = 0; return r; }
+
+static inline bool sn_val_eq(SnVal a, SnVal b) {
+    if (a.tag == SN_T_INT && b.tag == SN_T_FLOAT) return (double)a.u.i == b.u.f;
+    if (a.tag == SN_T_FLOAT && b.tag == SN_T_INT) return a.u.f == (double)b.u.i;
+    if (a.tag != b.tag) return false;
+    switch (a.tag) {
+        case SN_T_NULL: return true;
+        case SN_T_INT: return a.u.i == b.u.i;
+        case SN_T_FLOAT: return a.u.f == b.u.f;
+        case SN_T_BOOL: return a.u.b == b.u.b;
+        default: return sn_str_eq(a.u.s, b.u.s);
+    }
+}
+
+/* repr variants quote strings; used for elements inside lists and tuples */
+static inline void sn_buf_str_repr(SnBuf *b, SnStr *s) {
+    sn_buf_text(b, "\"", 1);
+    sn_buf_text(b, s->data, s->len);
+    sn_buf_text(b, "\"", 1);
+}
+
+static inline void sn_buf_val(SnBuf *b, SnVal v) {
+    switch (v.tag) {
+        case SN_T_NULL: sn_buf_text(b, "null", 4); break;
+        case SN_T_INT: sn_buf_int(b, v.u.i); break;
+        case SN_T_FLOAT: sn_buf_float(b, v.u.f); break;
+        case SN_T_BOOL: sn_buf_bool(b, v.u.b); break;
+        default: sn_buf_str(b, v.u.s); break;
+    }
+}
+static inline void sn_buf_val_repr(SnBuf *b, SnVal v) {
+    if (v.tag == SN_T_STR) sn_buf_str_repr(b, v.u.s); else sn_buf_val(b, v);
+}
+
+/* ---------- lists: 1-based, bounds-checked, reference semantics ---------- */
+
+SN_COLD static void sn_list_oob(const char *loc, int64_t i, int64_t len) {
+    if (i < 1 && i != 0)
+        sn_panic(loc, "list index %" PRId64 " is out of range (length %" PRId64 "; indexes start at 1, negative indexing is not supported)", i, len);
+    sn_panic(loc, "list index %" PRId64 " is out of range (length %" PRId64 "; indexes start at 1)", i, len);
+}
+
+#define SN_DEFINE_LIST(N, T) \
+typedef struct N { int64_t len, cap; T *data; } N; \
+static inline N *N##_new(int64_t cap) { \
+    N *l = (N *)sn_alloc(sizeof(N)); l->len = 0; l->cap = cap > 4 ? cap : 4; \
+    l->data = (T *)sn_alloc(sizeof(T) * (size_t)l->cap); return l; } \
+static inline void N##_push(N *l, T v) { \
+    if (l->len == l->cap) { l->cap *= 2; l->data = (T *)realloc(l->data, sizeof(T) * (size_t)l->cap); \
+        if (!l->data) sn_panic("<runtime>", "out of memory"); } \
+    l->data[l->len++] = v; } \
+static inline T *N##_at(N *l, int64_t i, const char *loc) { \
+    if (i < 1 || i > l->len) sn_list_oob(loc, i, l->len); return &l->data[i - 1]; } \
+static inline void N##_clear(N *l) { l->len = 0; } \
+static inline void N##_reverse(N *l) { \
+    for (int64_t a = 0, b = l->len - 1; a < b; a++, b--) { T t = l->data[a]; l->data[a] = l->data[b]; l->data[b] = t; } } \
+static inline N *N##_copy(N *l) { N *r = N##_new(l->len); memcpy(r->data, l->data, sizeof(T) * (size_t)l->len); r->len = l->len; return r; } \
+static inline void N##_merge(N *l, N *o) { int64_t n = o->len; for (int64_t i = 0; i < n; i++) N##_push(l, o->data[i]); }
+
+#define SN_DEFINE_LIST_NUM(N, T) \
+static inline T N##_sum(N *l) { T s = 0; for (int64_t i = 0; i < l->len; i++) s += l->data[i]; return s; } \
+static inline T N##_min(N *l, const char *loc) { \
+    if (l->len == 0) sn_panic(loc, "min() of an empty list"); \
+    T m = l->data[0]; for (int64_t i = 1; i < l->len; i++) if (l->data[i] < m) m = l->data[i]; return m; } \
+static inline T N##_max(N *l, const char *loc) { \
+    if (l->len == 0) sn_panic(loc, "max() of an empty list"); \
+    T m = l->data[0]; for (int64_t i = 1; i < l->len; i++) if (l->data[i] > m) m = l->data[i]; return m; } \
+static inline double N##_mean(N *l, const char *loc) { \
+    if (l->len == 0) sn_panic(loc, "mean() of an empty list"); \
+    double s = 0; for (int64_t i = 0; i < l->len; i++) s += (double)l->data[i]; return s / (double)l->len; } \
+static int N##_cmp(const void *a, const void *b) { T x = *(const T *)a, y = *(const T *)b; return (x > y) - (x < y); } \
+static inline void N##_sort(N *l) { qsort(l->data, (size_t)l->len, sizeof(T), N##_cmp); }
+
+#define SN_DEFINE_LIST_STRSORT(N) \
+static int N##_cmp(const void *a, const void *b) { return sn_str_cmp(*(SnStr *const *)a, *(SnStr *const *)b); } \
+static inline void N##_sort(N *l) { qsort(l->data, (size_t)l->len, sizeof(SnStr *), N##_cmp); }
+
 #endif /* SNRT_H */

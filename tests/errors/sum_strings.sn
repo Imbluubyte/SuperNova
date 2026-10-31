@@ -1,0 +1,2 @@
+var xs = ["a"]
+print(xs.sum())

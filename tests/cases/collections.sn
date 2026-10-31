@@ -1,0 +1,82 @@
+var numbers = [10, 20, 30]
+print(numbers[1], numbers[3], numbers.length())
+numbers[2] = 25
+numbers[1] += 5
+print(numbers)
+
+var items = [10, "Hello", true, 5.5, null]
+print(items)
+print(items.length())
+
+var a = [1, 2, 3]
+var b = [4, 5, 6]
+print(a * 2, a * b, a + b, b - a, 10 - a, -a)
+print([1, 2, 3] / 2, [1.5, 2.5] * 2)
+
+var nums = [1, 2, 3, 4, 5]
+print(nums.filter(< 4), nums.filter(> 3), nums.filter(== 2), nums.filter(!= 2))
+var mixed = [1, 2, 3, 4, 5, "Hi", "Hello"]
+print(mixed.filter(str), mixed.filter(int))
+
+fn isEven(number):
+    return number % 2 == 0
+
+fn greaterThan(number, minimum):
+    return number > minimum
+
+var big = [1, 5, 10, 15, 20]
+print(nums.filter(isEven), big.filter(greaterThan, 9), big.filter(greaterThan, minimum=14))
+print(nums)
+
+var xs: List[Int] = []
+xs.add(3)
+xs.add(1)
+xs.add(2)
+xs.merge([9, 8])
+print(xs, xs.sum(), xs.min(), xs.max(), xs.mean())
+xs.sort()
+print(xs)
+xs.reverse()
+print(xs)
+print(xs.remove(9), xs.remove(100), xs, xs.contains(8))
+xs.clear()
+print(xs, xs.length())
+
+var names = ["Zed", "Amy", "Bob"]
+names.sort()
+print(names, names.length())
+for n in names:
+    print(f"hi {n}")
+
+var total = 0
+for v in [1, 2, 3]:
+    total += v
+print(total)
+
+var alias = a
+alias.add(99)
+var snapshot = a.copy()
+a.add(100)
+print(a, alias, snapshot)
+
+fn getPosition():
+    return 10, 20
+
+var position = getPosition()
+var x = position[1]
+var y = position[2]
+print(x, y, position)
+var info = ("Ana", 30, true)
+print(info, info[1], f"{info} and {numbers}")
+print(str([1, "a"]), (1,))
+
+var grid = [[1, 2], [3, 4]]
+grid[2][1] = 30
+print(grid, grid[1][2])
+print(items.filter(null))
+
+fn firstOf(xs: List[Int]) -> Int:
+    return xs[1]
+print(firstOf([7, 8]))
+var floats: List[Float] = [1, 2, 3]
+print(floats, floats / 2)

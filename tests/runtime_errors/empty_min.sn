@@ -1,0 +1,2 @@
+var xs: List[Int] = []
+print(xs.min())

@@ -4,10 +4,10 @@ A fast, statically typed, Python-inspired language that compiles ahead-of-time t
 native code (via C and clang) and is designed to build and run on Android/Termux.
 
 **Status: early development.** SuperNova programs using variables, numbers,
-strings, f-strings, control flow (`if/orif/else`, `while`, `for` over ranges,
+strings, f-strings, lists (1-based, elementwise arithmetic, `filter`), tuples, control flow (`if/orif/else`, `while`, `for` over ranges,
 `match`), and functions (generic, recursive, default and named arguments) compile
-to native executables today. Classes, collections, errors, async and modules are
-parsed but not implemented yet; see [ROADMAP.md](ROADMAP.md).
+to native executables today. Classes, dictionaries, errors, async and modules are
+parsed or planned but not implemented yet. **Memory is not yet reclaimed** (no garbage collector); see [ROADMAP.md](ROADMAP.md).
 
 * [Language reference](docs/LANGUAGE.md) (implemented subset)
 * [Architecture and design decisions](docs/ARCHITECTURE.md)

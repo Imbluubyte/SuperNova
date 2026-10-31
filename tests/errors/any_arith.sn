@@ -1,0 +1,2 @@
+var xs = [1, "a"]
+print(xs[1] + 1)

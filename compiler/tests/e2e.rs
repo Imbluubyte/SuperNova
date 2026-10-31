@@ -76,3 +76,23 @@ fn runtime_errors_report_location_and_exit_nonzero() {
     assert!(stderr.contains("division by zero"), "{}", stderr);
     assert!(stderr.contains("div.sn:3:"), "{}", stderr);
 }
+
+#[test]
+fn runtime_errors_in_collections_are_clear() {
+    let cases = files("runtime_errors", "sn");
+    assert!(!cases.is_empty());
+    for sn in cases {
+        let want = std::fs::read_to_string(sn.with_extension("err")).unwrap();
+        let out = snc().arg("run").arg(&sn).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{} should fail at run time", sn.display());
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(want.trim()),
+            "{}: expected {:?}, got:\n{}",
+            sn.display(),
+            want.trim(),
+            stderr
+        );
+        assert!(stderr.contains(".sn:"), "{} lacks a source location:\n{}", sn.display(), stderr);
+    }
+}

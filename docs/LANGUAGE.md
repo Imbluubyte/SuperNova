@@ -1,9 +1,9 @@
 # SuperNova language reference (implemented subset)
 
 Everything here is implemented and covered by tests in `tests/`. Syntax that
-parses but is not yet implemented (classes, lists, dictionaries, tuples,
-try/catch, async, modules, first-class functions) is rejected with a
-"not implemented yet" compile error rather than silently misbehaving.
+parses but is not yet implemented (classes, dictionaries, try/catch, async,
+modules, first-class functions) is rejected with a "not implemented yet"
+compile error rather than silently misbehaving.
 
 ## Basics
 * Indentation-based blocks (4 spaces; tabs are rejected), `#` comments, no semicolons.
@@ -69,6 +69,45 @@ greet("Ana", punct="?")       # named arguments
 * Default arguments are evaluated at the call site in a context that cannot see caller locals. Arguments are evaluated left to right, in the order written.
 * Parameters are mutable locals.
 * Functions that are fully annotated are type-checked even if never called; generic ones are checked when first called.
+
+## Lists
+```
+var numbers = [10, 20, 30]
+print(numbers[1], numbers[3])      # 1-based: 10 30
+numbers[2] = 25
+var empty: List[Int] = []          # empty lists need an annotation
+for n in numbers:
+    print(n)
+```
+* Indexing is **1-based**. Index 0, indexes past the end and negative indexes are runtime errors that name the index and the length. There is no negative indexing.
+* The element type is fixed at compile time. `[1, 2, 3]` is a `List[Int]` stored as a contiguous `int64` array; `[1, 2.5]` is a `List[Float]` (Int widens); a list mixing Int/Float/Bool/String/null is a mixed list (`Any` elements, 16-byte tagged values). `add` of a value that does not fit is a compile error, so representation never changes behind your back.
+* Values taken from a mixed list can only be compared with `==`/`!=`; filter by type first (`items.filter(int)`). *(The filtered result is still a mixed list in V1; type narrowing is on the roadmap.)*
+* Lists have **reference semantics**: `var b = a` makes `b` another name for the same list. Use `a.copy()` for an independent list.
+* Printing shows strings quoted inside lists (`["Hi", "Hello"]`) and bare at top level.
+
+**Elementwise arithmetic** (`+ - * / // % **` and unary `-`) works list-with-number, number-with-list and list-with-list, producing a new list. `Int` lists stay `Int` except `/`, which gives `Float`. Lists of **different lengths are a runtime error** (no broadcasting, no silent truncation).
+
+**Methods:** `length()`, `add(x)`, `remove(x)` (first match, returns whether anything was removed), `contains(x)`, `merge(other)`, `copy()`, `clear()`, `reverse()`, `sort()` (numbers or strings), `sum()`, `min()`, `max()`, `mean()` (`mean` always returns `Float`; `min`/`max`/`mean` of an empty list are runtime errors), `filter(...)`.
+
+**filter** returns a *new* list and never modifies the original:
+```
+items.filter(str)            # by type: str, int, float, bool, null
+numbers.filter(< 4)          # comparison predicate: < <= > >= == !=
+numbers.filter(isEven)       # function taking the element, returning Bool
+numbers.filter(greaterThan, 9)   # extra arguments follow the function
+```
+A comparison predicate such as `< 4` is a dedicated syntactic form, valid only as a call argument. It compiles to an inlined comparison in the loop (no function call, no lambda).
+
+## Tuples
+```
+fn getPosition():
+    return 10, 20
+var position = getPosition()
+print(position[1], position[2])     # 1-based
+```
+* Tuples are immutable, fixed-size and may hold different types; they are plain structs passed by value (no allocation).
+* The index must be an integer **literal** because each element can have a different type, so the compiler needs to know which one you mean. Out-of-range literal indexes are compile errors.
+* Type syntax: `Tuple[Int, String]`. Multiple return values are just tuples; you are never forced to unpack them.
 
 ## Builtins
 `print(a, b, ...)` (space separated, newline terminated), `str(x)`, `int(x)`, `float(x)`.

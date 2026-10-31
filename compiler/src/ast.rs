@@ -8,6 +8,8 @@ pub enum TypeExpr {
     Named(String),
     /// `List[T]`
     List(Box<TypeExpr>),
+    /// `Tuple[A, B]`
+    Tuple(Vec<TypeExpr>),
     /// `T?`
     Optional(Box<TypeExpr>),
 }

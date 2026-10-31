@@ -1,0 +1,2 @@
+var xs: List[Float] = []
+print(xs.mean())

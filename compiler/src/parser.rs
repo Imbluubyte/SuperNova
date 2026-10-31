@@ -274,6 +274,13 @@ impl Parser {
             let inner = self.type_expr()?;
             self.expect(&Tok::RBracket, "']'")?;
             TypeExpr::List(Box::new(inner))
+        } else if name == "Tuple" && self.eat(&Tok::LBracket) {
+            let mut items = vec![self.type_expr()?];
+            while self.eat(&Tok::Comma) {
+                items.push(self.type_expr()?);
+            }
+            self.expect(&Tok::RBracket, "']'")?;
+            TypeExpr::Tuple(items)
         } else {
             TypeExpr::Named(name)
         };

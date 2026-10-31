@@ -1,0 +1,2 @@
+var xs = [1]
+print(xs.filter(5))
