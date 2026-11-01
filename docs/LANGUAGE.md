@@ -307,6 +307,26 @@ if name != null:
 
 `repeat(n):` runs its body `n` times (an Int expression, evaluated once). `break` and `continue` work.
 
+## Lambdas
+
+`fn(params) => expression` makes an anonymous function:
+
+```
+var xs = [1, 2, 3]
+print(xs.map(fn(x) => x * 2))
+var offset = 10
+var shift = fn(x: Int) => x + offset      # captures offset
+fn makeAdder(n: Int) -> Fn(Int) -> Int:
+	return fn(x) => x + n
+```
+
+Parameter types come from the place the lambda is used (`map`, a parameter or variable of
+type `Fn(...) -> ...`) or from annotations. The body is a single expression; use a named
+function when you need statements. A lambda copies the local variables it uses at the moment
+it is created (lists, dictionaries and objects are shared, so changes to those are visible
+both ways); top-level variables are used directly. Inside a method a lambda can use fields,
+methods and `self`.
+
 ## Standard library
 
 Modules shipped inside the compiler; import them with `use std.<name>`:

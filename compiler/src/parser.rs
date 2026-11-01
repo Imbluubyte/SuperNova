@@ -754,6 +754,23 @@ impl Parser {
                 let e = self.unary_expr()?;
                 ExprKind::Await(Box::new(e))
             }
+            Tok::Fn => {
+                self.expect(&Tok::LParen, "'(' after 'fn' in a lambda")?;
+                let mut params = Vec::new();
+                while !self.at(&Tok::RParen) {
+                    let name = self.ident("a parameter name")?;
+                    let ty = if self.eat(&Tok::Colon) { Some(self.type_expr()?) } else { None };
+                    params.push(Param { name, ty, default: None });
+                    if !self.eat(&Tok::Comma) {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RParen, "')'")?;
+                let ret = if self.eat(&Tok::Arrow) { Some(self.type_expr()?) } else { None };
+                self.expect(&Tok::FatArrow, "'=>' (a lambda looks like fn(x) => x * 2)")?;
+                let body = self.expr()?;
+                ExprKind::Lambda(Box::new(Lambda { params, ret, body }))
+            }
             Tok::LParen => {
                 let first = self.expr()?;
                 if self.at(&Tok::Comma) {

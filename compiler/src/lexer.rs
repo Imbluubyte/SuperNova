@@ -71,6 +71,7 @@ pub enum Tok {
     Colon,
     Dot,
     Arrow,
+    FatArrow,
     Plus,
     Minus,
     Star,
@@ -585,6 +586,7 @@ impl<'a> Lexer<'a> {
             }
             ('.', _) => Tok::Dot,
             ('-', Some('>')) => two(self, Tok::Arrow),
+            ('=', Some('>')) => two(self, Tok::FatArrow),
             ('+', Some('=')) => two(self, Tok::PlusEq),
             ('-', Some('=')) => two(self, Tok::MinusEq),
             ('*', Some('*')) => two(self, Tok::StarStar),

@@ -1,0 +1,1 @@
+var f: Fn(Int) -> Float = fn(x) => "s"

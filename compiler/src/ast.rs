@@ -91,6 +91,15 @@ pub enum ExprKind {
     Await(Box<Expr>),
     /// `x!`: the value of an optional, or a runtime error if it is null
     Force(Box<Expr>),
+    /// `fn(x, y) => expr`: an anonymous function that can use the variables around it.
+    Lambda(Box<Lambda>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lambda {
+    pub params: Vec<Param>,
+    pub ret: Option<TypeExpr>,
+    pub body: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -87,11 +87,12 @@ impl<'a> Gen<'a> {
                 }
                 let rc = self.cty(*r);
                 let name = format!("SnFn{}", self.types.len());
+                params.insert(0, "void*".to_string());
                 self.type_decls.push_str(&format!(
-                    "typedef {} (*{})({});\n",
+                    "typedef struct {{ {} (*f)({}); void *env; }} {};\n",
                     rc,
-                    name,
-                    if params.is_empty() { "void".to_string() } else { params.join(", ") }
+                    params.join(", "),
+                    name
                 ));
                 self.types.insert(t, name.clone());
                 name
@@ -139,6 +140,9 @@ impl<'a> Gen<'a> {
                 }
                 return Ok(v);
             }
+        }
+        if let (ExprKind::Lambda(l), Some(Ty::Func(ps, r))) = (&e.kind, hint) {
+            return self.lambda_expr(l, Some(ps), Some(*r), e.span);
         }
         if let (ExprKind::List(items), Some(Ty::List(inner))) = (&e.kind, hint) {
             return self.list_literal(items, Some(*inner), e.span);

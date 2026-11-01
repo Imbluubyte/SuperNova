@@ -1,0 +1,1 @@
+this lambda returns String, but Float is expected

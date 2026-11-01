@@ -77,7 +77,7 @@ impl<'a> Gen<'a> {
             }
         };
         let (cname, ret) = self.instance(decl, ptys.clone(), span)?;
-        Ok(E::new(cname, Ty::func_of(ptys, ret), true))
+        Ok(self.named_fn_value(&cname, &ptys, ret))
     }
 
     /// Evaluate call arguments left to right, then build the call text with `f`.
@@ -124,7 +124,12 @@ impl<'a> Gen<'a> {
             };
             parts.push(E::new(c, *p, v.pure));
         }
-        let text = self.ordered(parts, |c| format!("{}({})", c[0], c[1..].join(", ")));
+        let fc = self.cty(parts[0].ty);
+        let k = self.fresh();
+        let text = self.ordered(parts, |c| {
+            let rest = if c.len() > 1 { format!(", {}", c[1..].join(", ")) } else { String::new() };
+            format!("({{ {fc} fv{k} = {f}; fv{k}.f(fv{k}.env{rest}); }})", fc = fc, k = k, f = c[0], rest = rest)
+        });
         Ok(E::new(text, ret, false))
     }
 
@@ -134,6 +139,7 @@ impl<'a> Gen<'a> {
             ExprKind::Ident(n) if self.fns.contains_key(n.as_str()) && !self.var_exists(n) => {
                 self.func_value(n, Some(ptys), e.span)?
             }
+            ExprKind::Lambda(l) => self.lambda_expr(l, Some(ptys), None, e.span)?,
             _ => self.val(e)?,
         };
         let Ty::Func(ps, r) = v.ty else {
@@ -197,11 +203,11 @@ impl<'a> Gen<'a> {
                         let rln = self.type_name(rty);
                         (
                             rty,
-                            format!("{rln}_push(r{n}, f{n}(l{n}->data[i{n}]));", rln = rln, n = n),
+                            format!("{rln}_push(r{n}, f{n}.f(f{n}.env, l{n}->data[i{n}]));", rln = rln, n = n),
                             format!("{rln}* r{n} = {rln}_new(l{n}->len); ", rln = rln, n = n),
                         )
                     }
-                    "each" => (Ty::Void, format!("f{n}(l{n}->data[i{n}]);", n = n), String::new()),
+                    "each" => (Ty::Void, format!("f{n}.f(f{n}.env, l{n}->data[i{n}]);", n = n), String::new()),
                     _ => {
                         if ret != Ty::Bool {
                             return err(
@@ -210,9 +216,9 @@ impl<'a> Gen<'a> {
                             );
                         }
                         let (init, test, brk) = if name == "any" {
-                            ("false", format!("f{n}(l{n}->data[i{n}])", n = n), "r = true; break;")
+                            ("false", format!("f{n}.f(f{n}.env, l{n}->data[i{n}])", n = n), "r = true; break;")
                         } else {
-                            ("true", format!("!f{n}(l{n}->data[i{n}])", n = n), "r = false; break;")
+                            ("true", format!("!f{n}.f(f{n}.env, l{n}->data[i{n}])", n = n), "r = false; break;")
                         };
                         (
                             Ty::Bool,
@@ -256,7 +262,7 @@ impl<'a> Gen<'a> {
                 let (fc, ac) = (self.cty(f.ty), self.cty(acc));
                 let text = self.ordered(vec![o, init, f], |c| {
                     format!(
-                        "({{ {ln}* l{n} = {l}; {ac} acc{n} = {i}; {fc} f{n} = {f}; for (int64_t i{n} = 0; i{n} < l{n}->len; i{n}++) acc{n} = f{n}(acc{n}, l{n}->data[i{n}]); acc{n}; }})",
+                        "({{ {ln}* l{n} = {l}; {ac} acc{n} = {i}; {fc} f{n} = {f}; for (int64_t i{n} = 0; i{n} < l{n}->len; i{n}++) acc{n} = f{n}.f(f{n}.env, acc{n}, l{n}->data[i{n}]); acc{n}; }})",
                         ln = ln, n = n, l = c[0], ac = ac, i = c[1], fc = fc, f = c[2]
                     )
                 });

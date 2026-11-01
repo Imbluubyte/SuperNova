@@ -19,6 +19,7 @@ mod async_;
 mod errors;
 mod funcs;
 mod optional;
+mod lambda;
 
 mod stdlib;
 use errors::{assigned_in_try, Jump, TryFrame};
@@ -99,7 +100,8 @@ impl Ty {
     /// never scans storage of pointer-free types).
     fn has_ptrs(self) -> bool {
         match self {
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void | Ty::Func(..) => false,
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void => false,
+            Ty::Func(..) => true,
             Ty::Str | Ty::Any | Ty::List(_) | Ty::Dict(..) | Ty::Task(_) | Ty::Class(_) => true,
             Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
             Ty::Opt(t) => t.has_ptrs(),
@@ -248,6 +250,9 @@ struct Gen<'a> {
     fns: HashMap<String, &'a FnDecl>,
     fn_order: Vec<&'a FnDecl>,
     globals: HashMap<String, Var>,
+    thunks: usize,
+    thunk_cache: HashMap<String, String>,
+    lambda_cls: HashMap<String, usize>,
     global_decls: String,
     protos: String,
     bodies: String,
@@ -277,6 +282,9 @@ pub fn generate<'a>(module: &'a Module, files: &[String]) -> R<String> {
         fns: HashMap::new(),
         fn_order: Vec::new(),
         globals: HashMap::new(),
+        thunks: 0,
+        thunk_cache: HashMap::new(),
+        lambda_cls: HashMap::new(),
         global_decls: String::new(),
         protos: String::new(),
         bodies: String::new(),
@@ -685,6 +693,7 @@ impl<'a> Gen<'a> {
         cx.ret_decl = declared;
         cx.volatile = assigned_in_try(&decl.body);
         cx.is_async = decl.is_async;
+        cx.cur_class = self.lambda_cls.get(&decl.name).copied();
         let mut params_c = Vec::new();
         for (p, t) in decl.params.iter().zip(&ptys) {
             let pc = format!("v_{}", p.name);
@@ -1088,6 +1097,7 @@ impl<'a> Gen<'a> {
             ExprKind::Binary(BinOp::Has, l, r) => self.has_expr(l, r, e.span),
             ExprKind::Binary(BinOp::Coalesce, l, r) => self.coalesce(l, r, e.span),
             ExprKind::Force(x) => self.force_expr(x, e.span),
+            ExprKind::Lambda(l) => self.lambda_expr(l, None, None, e.span),
             ExprKind::Binary(op, l, r) => {
                 let lv = self.val(l)?;
                 let rv = match op {

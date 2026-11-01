@@ -481,6 +481,21 @@ impl<'a> Rn<'a> {
                 self.expr(start)?;
                 self.expr(end)?;
             }
+            ExprKind::Lambda(l) => {
+                for p in &mut l.params {
+                    if let Some(t) = &mut p.ty {
+                        self.ty(t, span)?;
+                    }
+                }
+                if let Some(t) = &mut l.ret {
+                    self.ty(t, span)?;
+                }
+                let names: Vec<String> = l.params.iter().map(|p| p.name.clone()).collect();
+                self.scopes.push(names.into_iter().collect());
+                let r = self.expr(&mut l.body);
+                self.scopes.pop();
+                r?;
+            }
         }
         Ok(())
     }
