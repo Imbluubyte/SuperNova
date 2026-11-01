@@ -121,6 +121,15 @@ pub struct FnDecl {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EnumDecl {
+    pub name: String,
+    /// Variant names with their values (explicit or counting up from the previous one).
+    pub variants: Vec<(String, i64)>,
+    pub is_private: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClassDecl {
     pub name: String,
     pub parent: Option<String>,
@@ -158,6 +167,7 @@ pub enum StmtKind {
     Continue,
     Pass,
     Fn(FnDecl),
+    Enum(EnumDecl),
     Class(ClassDecl),
     Try {
         body: Vec<Stmt>,

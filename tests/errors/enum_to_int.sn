@@ -1,0 +1,3 @@
+enum Color:
+	Red
+var n: Int = Color.Red

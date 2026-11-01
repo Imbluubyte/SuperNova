@@ -1,0 +1,16 @@
+Direction.Left
+Left 2
+going up sideways
+11 32
+Direction.Right
+facing Direction.Right
+[Direction.Up, Direction.Down, Direction.Left, Direction.Right]
+Up
+Down
+Left
+Right
+true true
+[Direction.Up, Direction.Down]
+has down
+Direction.Up
+A

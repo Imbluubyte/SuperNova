@@ -20,6 +20,7 @@ mod errors;
 mod funcs;
 mod optional;
 mod lambda;
+mod enums;
 
 mod stdlib;
 use errors::{assigned_in_try, Jump, TryFrame};
@@ -27,6 +28,7 @@ mod collections;
 
 thread_local! {
     /// Class names by class index, so `Ty::name()` can print them.
+    static ENUM_NAMES: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
     static CLASS_NAMES: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
 }
 
@@ -66,6 +68,8 @@ enum Ty {
     Tuple(&'static [Ty]),
     /// Instance of a user class (index into `Gen::classes`); a reference to a heap object.
     Class(u32),
+    /// A user enum (index into `Gen::enums`); an Int underneath.
+    Enum(u32),
 }
 
 impl Ty {
@@ -79,6 +83,7 @@ impl Ty {
             Ty::Void => "nothing".into(),
             Ty::Any => "Any".into(),
             Ty::Class(c) => CLASS_NAMES.with(|n| n.borrow()[c as usize].clone()),
+            Ty::Enum(e) => ENUM_NAMES.with(|n| n.borrow()[e as usize].clone()),
             Ty::List(e) => format!("List[{}]", e.name()),
             Ty::Dict(k, v) => format!("Dict[{}, {}]", k.name(), v.name()),
             Ty::Task(t) => format!("Task[{}]", t.name()),
@@ -100,7 +105,7 @@ impl Ty {
     /// never scans storage of pointer-free types).
     fn has_ptrs(self) -> bool {
         match self {
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void => false,
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void | Ty::Enum(_) => false,
             Ty::Func(..) => true,
             Ty::Str | Ty::Any | Ty::List(_) | Ty::Dict(..) | Ty::Task(_) | Ty::Class(_) => true,
             Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
@@ -192,6 +197,11 @@ struct Bound {
     written: Vec<usize>,
 }
 
+struct EnumInfo {
+    name: String,
+    variants: Vec<(String, i64)>,
+}
+
 struct Inst {
     cname: String,
     /// None while an unannotated function is still being checked.
@@ -251,6 +261,8 @@ struct Gen<'a> {
     fn_order: Vec<&'a FnDecl>,
     globals: HashMap<String, Var>,
     thunks: usize,
+    enums: Vec<EnumInfo>,
+    enum_ix: HashMap<String, usize>,
     thunk_cache: HashMap<String, String>,
     lambda_cls: HashMap<String, usize>,
     global_decls: String,
@@ -283,6 +295,8 @@ pub fn generate<'a>(module: &'a Module, files: &[String]) -> R<String> {
         fn_order: Vec::new(),
         globals: HashMap::new(),
         thunks: 0,
+        enums: Vec::new(),
+        enum_ix: HashMap::new(),
         thunk_cache: HashMap::new(),
         lambda_cls: HashMap::new(),
         global_decls: String::new(),
@@ -412,11 +426,12 @@ impl<'a> Gen<'a> {
                 self.fn_order.push(f);
             }
         }
+        self.collect_enums(module)?;
         self.collect_classes(module)?;
         self.cx.volatile = assigned_in_try(&module.items);
         // Pass 2: top-level statements form the program entry point.
         for s in &module.items {
-            if !matches!(s.kind, StmtKind::Fn(_) | StmtKind::Class(_)) {
+            if !matches!(s.kind, StmtKind::Fn(_) | StmtKind::Class(_) | StmtKind::Enum(_)) {
                 self.stmt(s)?;
             }
         }
@@ -507,7 +522,10 @@ impl<'a> Gen<'a> {
                 "Any" => Ok(Ty::Any),
                 other => match self.class_ix.get(other) {
                     Some(&c) => Ok(Ty::Class(c as u32)),
-                    None => err(format!("unknown type '{}'", other), span),
+                    None => match self.enum_ix.get(other) {
+                        Some(&e) => Ok(Ty::Enum(e as u32)),
+                        None => err(format!("unknown type '{}'", other), span),
+                    },
                 },
             },
             TypeExpr::List(inner) => Ok(Ty::list_of(self.resolve_type(inner, span)?)),
@@ -785,6 +803,9 @@ impl<'a> Gen<'a> {
         if let ExprKind::Member(obj, method) = &callee.kind {
             if matches!(&obj.kind, ExprKind::Ident(n) if n == "super") {
                 return self.super_call(method, args, span);
+            }
+            if let Some(r) = self.enum_static_call(obj, method, args, span) {
+                return r;
             }
             return self.method_call(obj, method, args, span);
         }
@@ -1168,6 +1189,22 @@ impl<'a> Gen<'a> {
         }
         if let Ty::Opt(_) = rt {
             return Err(self.null_use(rt, &format!("use '{}' on", op_sym(op)), span));
+        }
+        if let (Ty::Enum(a), Ty::Enum(b)) = (lt, rt) {
+            if a == b && matches!(op, Eq | Ne) {
+                let sym = op_sym(op);
+                let c = self.seq2(&l, &r, move |x, y| format!("({} {} {})", x, sym, y));
+                return Ok(E::new(c, Ty::Bool, pure));
+            }
+            return err(
+                format!(
+                    "cannot apply '{}' to {} and {}; enum values can only be compared with == and != (and only to the same enum)",
+                    op_sym(op),
+                    lt.name(),
+                    rt.name()
+                ),
+                span,
+            );
         }
         if matches!(lt, Ty::Dict(..)) || matches!(rt, Ty::Dict(..)) {
             return err("dictionaries cannot be used with this operator or compared with ==", span);
@@ -1619,6 +1656,10 @@ impl<'a> Gen<'a> {
                 ),
                 f.span,
             ),
+            StmtKind::Enum(e) => err(
+                format!("enum '{}' must be declared at module level, not inside a function or block", e.name),
+                s.span,
+            ),
             StmtKind::Class(c) => err(
                 format!("class '{}' must be declared at module level, not inside a function or block", c.name),
                 s.span,
@@ -1637,6 +1678,13 @@ impl<'a> Gen<'a> {
             | ExprKind::Str(_)
             | ExprKind::Bool(_)
             | ExprKind::Null => self.val(e),
+            ExprKind::Member(..) => {
+                let v = self.val(e)?;
+                if !matches!(v.ty, Ty::Enum(_)) {
+                    return err("'case' patterns must be literal values or enum variants", e.span);
+                }
+                Ok(v)
+            }
             ExprKind::Unary(UnOp::Neg, x) if matches!(x.kind, ExprKind::Int(_) | ExprKind::Float(_)) => {
                 self.val(e)
             }

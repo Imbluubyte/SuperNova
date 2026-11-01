@@ -163,4 +163,4 @@ zero, empty `min()`, mismatched list lengths, bad `int("x")`, stack overflow, ou
 
 ## Not implemented yet
 `for` over anything but ranges, lists and dictionaries. These parse but give a clear
-"not implemented yet" error. Lambdas and enums are deliberately not in V1.
+"not implemented yet" error. 

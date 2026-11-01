@@ -754,9 +754,15 @@ impl<'a> Gen<'a> {
         if matches!(&obj.kind, ExprKind::Ident(n) if n == "super") {
             return err("'super' can only be used as super.method(...)", span);
         }
+        if let Some(r) = self.enum_variant(obj, name, span) {
+            return r;
+        }
         let o = self.val(obj)?;
         if let Ty::Opt(_) = o.ty {
             return Err(self.null_use(o.ty, &format!("read '.{}' of", name), span));
+        }
+        if let Ty::Enum(e) = o.ty {
+            return self.enum_member(o, e, name, span);
         }
         let Ty::Class(c) = o.ty else {
             return err(format!("a value of type {} has no field '{}'", o.ty.name(), name), span);

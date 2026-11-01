@@ -1,0 +1,5 @@
+enum Color:
+	Red
+enum Mode:
+	Fast
+print(Color.Red == Mode.Fast)

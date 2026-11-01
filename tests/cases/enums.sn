@@ -1,0 +1,50 @@
+enum Direction:
+	Up
+	Down
+	Left
+	Right
+
+enum Key:
+	A = 10
+	B
+	Space = 32
+
+class Player:
+	var facing = Direction.Up
+	fn turn():
+		if facing == Direction.Up:
+			facing = Direction.Right
+		else:
+			facing = Direction.Up
+
+fn describe(d: Direction) -> String:
+	match d:
+		case Direction.Up:
+			return "going up"
+		case Direction.Down:
+			return "going down"
+		default:
+			return "sideways"
+
+var d = Direction.Left
+print(d)
+print(d.name, d.value)
+print(describe(Direction.Up), describe(d))
+print(Key.B.value, Key.Space.value)
+var p = Player()
+p.turn()
+print(p.facing)
+print(f"facing {p.facing}")
+print(Direction.values())
+var all = Direction.values()
+for x in all:
+	print(x.name)
+print(d != Direction.Up, d == Direction.Left)
+var dirs: List[Direction] = [Direction.Up, Direction.Down]
+print(dirs)
+if dirs has Direction.Down:
+	print("has down")
+var o: Direction? = null
+print(o ?? Direction.Up)
+var fn1 = fn(k: Key) => k.name
+print(fn1(Key.A))

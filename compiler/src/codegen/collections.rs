@@ -37,7 +37,7 @@ impl<'a> Gen<'a> {
 
     pub(super) fn cty(&mut self, t: Ty) -> String {
         match t {
-            Ty::Int => "int64_t".into(),
+            Ty::Int | Ty::Enum(_) => "int64_t".into(),
             Ty::Float => "double".into(),
             Ty::Bool => "bool".into(),
             Ty::Str => "SnStr*".into(),
@@ -919,6 +919,10 @@ impl<'a> Gen<'a> {
                 } else {
                     format!("sn_buf_val_repr(&{}, {}); ", b, c)
                 }
+            }
+            Ty::Enum(e) => {
+                let text = self.enum_text(e as usize, true, c);
+                format!("sn_buf_str(&{}, {}); ", b, text)
             }
             Ty::Opt(inner) => {
                 let on = self.type_name(ty);

@@ -327,6 +327,32 @@ it is created (lists, dictionaries and objects are shared, so changes to those a
 both ways); top-level variables are used directly. Inside a method a lambda can use fields,
 methods and `self`.
 
+## Enums
+
+```
+enum Direction:
+	Up
+	Down
+	Left = 10
+	Right          # 11
+
+var d = Direction.Up
+if d == Direction.Up:
+	print(d)                 # Direction.Up
+print(d.name, d.value)       # Up 0
+match d:
+	case Direction.Up:
+		print("up")
+	default:
+		print("other")
+print(Direction.values())    # every variant, in order
+```
+
+An enum is a separate type: it cannot be mixed with Int or another enum, and only `==` and
+`!=` apply. Variants count up from 0 (or from the last explicit value; values must be unique
+integer literals). `.name` is the variant's name and `.value` its Int. Enums are declared at the
+top level of a file, can be `private`, and are used from other modules as `mod.Direction.Up`.
+
 ## Standard library
 
 Modules shipped inside the compiler; import them with `use std.<name>`:

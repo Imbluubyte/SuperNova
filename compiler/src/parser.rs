@@ -168,6 +168,11 @@ impl Parser {
                         c.is_private = true;
                         StmtKind::Class(c)
                     }
+                    Tok::Enum => {
+                        let mut e = self.enum_decl()?;
+                        e.is_private = true;
+                        StmtKind::Enum(e)
+                    }
                     _ => {
                         return Err(CompileError::new(
                             "'private' must be followed by fn, var, const or class",
@@ -193,6 +198,7 @@ impl Parser {
             Tok::Var | Tok::Const => self.var_decl(false)?,
             Tok::Fn | Tok::Async => StmtKind::Fn(self.fn_decl()?),
             Tok::Class => StmtKind::Class(self.class_decl()?),
+            Tok::Enum => StmtKind::Enum(self.enum_decl()?),
             Tok::If => self.if_stmt()?,
             Tok::While => {
                 self.bump();
@@ -397,6 +403,47 @@ impl Parser {
         let ret = if self.eat(&Tok::Arrow) { Some(self.type_expr()?) } else { None };
         let body = self.block()?;
         Ok(FnDecl { name, params, ret, body, is_async, is_private: false, span })
+    }
+
+    fn enum_decl(&mut self) -> PResult<EnumDecl> {
+        let span = self.span();
+        self.expect(&Tok::Enum, "'enum'")?;
+        let name = self.ident("an enum name")?;
+        let body = self.block()?;
+        let mut variants: Vec<(String, i64)> = Vec::new();
+        let mut next = 0i64;
+        for s in body {
+            let (vname, value) = match s.kind {
+                StmtKind::Expr(Expr { kind: ExprKind::Ident(n), .. }) => (n, next),
+                StmtKind::Assign { target: Expr { kind: ExprKind::Ident(n), .. }, op: None, value } => match value.kind {
+                    ExprKind::Int(v) => (n, v),
+                    ExprKind::Unary(UnOp::Neg, ref x) if matches!(x.kind, ExprKind::Int(_)) => {
+                        let ExprKind::Int(v) = x.kind else { unreachable!() };
+                        (n, -v)
+                    }
+                    _ => return Err(CompileError::new("an enum value must be an integer literal", value.span)),
+                },
+                StmtKind::Pass => continue,
+                _ => {
+                    return Err(CompileError::new(
+                        "an enum body lists variant names, one per line (optionally `Name = 5`)",
+                        s.span,
+                    ))
+                }
+            };
+            if variants.iter().any(|(n, _)| *n == vname) {
+                return Err(CompileError::new(format!("enum variant '{}' is declared twice", vname), s.span));
+            }
+            if variants.iter().any(|(_, v)| *v == value) {
+                return Err(CompileError::new(format!("two variants of enum '{}' have the value {}", name, value), s.span));
+            }
+            next = value + 1;
+            variants.push((vname, value));
+        }
+        if variants.is_empty() {
+            return Err(CompileError::new("an enum needs at least one variant", span));
+        }
+        Ok(EnumDecl { name, variants, is_private: false, span })
     }
 
     fn class_decl(&mut self) -> PResult<ClassDecl> {

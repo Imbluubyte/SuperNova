@@ -273,6 +273,7 @@ impl Loader {
                 let (name, private) = match &s.kind {
                     StmtKind::Fn(f) => (f.name.clone(), f.is_private),
                     StmtKind::Class(c) => (c.name.clone(), c.is_private),
+                    StmtKind::Enum(e) => (e.name.clone(), e.is_private),
                     StmtKind::VarDecl { name, is_private, .. } => (name.clone(), *is_private),
                     _ => continue,
                 };
@@ -612,6 +613,11 @@ impl<'a> Rn<'a> {
                     f.name = self.mangle(&f.name);
                 }
                 self.function(f, None)?;
+            }
+            StmtKind::Enum(e) => {
+                if top {
+                    e.name = self.mangle(&e.name);
+                }
             }
             StmtKind::Class(c) => {
                 let mangled = if top { self.mangle(&c.name) } else { c.name.clone() };
