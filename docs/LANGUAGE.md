@@ -275,6 +275,38 @@ print([1, 2, 3].map(double), [1, 2, 3].reduce(0, add))
 - There are no lambdas in V1: only names of top-level functions.
 - List methods taking functions: `map(f)`, `each(f)`, `reduce(start, f)`, `any(f)`, `all(f)`; `filter(f)` also accepts a function variable.
 
+## Optional types and null safety
+
+`T?` holds either a `T` or `null`. A plain `T` is never null, and an optional cannot be
+used as a value until the program has dealt with the null case:
+
+```
+var next: Node? = null
+var name: String? = findName()
+print(name ?? "anonymous")      # fallback when null
+print(name!)                    # assert non-null (runtime error if null)
+if name != null:
+	print(name.length())        # name reads as a plain String here
+```
+
+* `x == null` / `x != null` test for null. After `if x != null:` (also `and` chains,
+  `while x != null:`, and `if x == null: return` / `throw` / `break` / `continue` for the rest
+  of the block) the variable reads as its plain type. Narrowing applies to local variables,
+  parameters and top-level variables; it is dropped when the variable is assigned or, for
+  top-level variables, when any non-builtin function is called. Fields (`self.next`) are not
+  narrowed: copy them into a local first (`var n = self.next`).
+* `a ?? b` gives `a` if it is not null, otherwise `b`. `x!` unwraps or raises a catchable runtime error.
+* `T` and `null` convert to `T?` implicitly; `T?` never converts to `T` implicitly.
+* `dict.get(key)` (one argument) returns `V?`; `dict.get(key, default)` returns `V`.
+* Optionals print as the value or `null`.
+
+## `has` and `repeat`
+
+`a has b` is true when a list contains an item, a dictionary a key, or a string a substring
+(same as `.contains(b)`). `not (xs has 3)` negates it.
+
+`repeat(n):` runs its body `n` times (an Int expression, evaluated once). `break` and `continue` work.
+
 ## Standard library
 
 Modules shipped inside the compiler; import them with `use std.<name>`:
@@ -283,7 +315,7 @@ Modules shipped inside the compiler; import them with `use std.<name>`:
 | --- | --- |
 | `std.math` | `PI E TAU`, `sqrt pow exp log log2 log10 sin cos tan asin acos atan atan2 hypot`, `floor ceil round trunc` (return Int), `abs min max clamp sign` (Int or Float), `gcd lerp toRadians toDegrees isNaN` |
 | `std.random` | `seed random randInt randFloat chance choice shuffle` |
-| `std.time` | `now monotonic since` |
+| `std.time` | `now monotonic since measure` |
 | `std.sys` | `args exit getEnv hasEnv write readLine input` |
 | `std.fs` | `readText writeText appendText exists readLines` |
 

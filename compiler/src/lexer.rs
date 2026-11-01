@@ -53,6 +53,7 @@ pub enum Tok {
     Async,
     Await,
     Use,
+    Has,
     As,
     Private,
     Manages,
@@ -92,6 +93,10 @@ pub enum Tok {
     DotDot,
     DotDotLt,
     Question,
+    /// `??`
+    QQ,
+    /// postfix `!`
+    Bang,
     // layout
     Newline,
     Indent,
@@ -145,6 +150,7 @@ fn keyword(s: &str) -> Option<Tok> {
         "while" => Tok::While,
         "for" => Tok::For,
         "in" => Tok::In,
+        "has" => Tok::Has,
         "match" => Tok::Match,
         "case" => Tok::Case,
         "default" => Tok::Default,
@@ -566,6 +572,7 @@ impl<'a> Lexer<'a> {
             }
             (',', _) => Tok::Comma,
             (':', _) => Tok::Colon,
+            ('?', Some('?')) => two(self, Tok::QQ),
             ('?', _) => Tok::Question,
             ('.', Some('.')) => {
                 self.bump();
@@ -589,6 +596,7 @@ impl<'a> Lexer<'a> {
             ('!', Some('=')) => two(self, Tok::NotEq),
             ('<', Some('=')) => two(self, Tok::LtEq),
             ('>', Some('=')) => two(self, Tok::GtEq),
+            ('!', _) => Tok::Bang,
             ('+', _) => Tok::Plus,
             ('-', _) => Tok::Minus,
             ('*', _) => Tok::Star,

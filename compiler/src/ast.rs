@@ -37,6 +37,10 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+    /// `a has b`: list contains element, dictionary has key, string contains text
+    Has,
+    /// `a ?? b`
+    Coalesce,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +89,8 @@ pub enum ExprKind {
     /// A comparison predicate such as `< 4`; only valid as a call argument.
     Predicate(BinOp, Box<Expr>),
     Await(Box<Expr>),
+    /// `x!`: the value of an optional, or a runtime error if it is null
+    Force(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -136,6 +142,8 @@ pub enum StmtKind {
     While { cond: Expr, body: Vec<Stmt> },
     For { var: String, iter: Expr, body: Vec<Stmt> },
     Match { subject: Expr, cases: Vec<(Expr, Vec<Stmt>)>, default: Option<Vec<Stmt>> },
+    /// `repeat(n):` runs the body n times
+    Repeat { count: Expr, body: Vec<Stmt> },
     Return(Option<Expr>),
     Break,
     Continue,

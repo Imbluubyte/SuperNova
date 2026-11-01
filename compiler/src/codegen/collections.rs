@@ -48,7 +48,7 @@ impl<'a> Gen<'a> {
             Ty::Task(_) => "SnTask*".into(),
             Ty::Func(..) => self.type_name(t),
             Ty::List(_) | Ty::Dict(..) => format!("{}*", self.type_name(t)),
-            Ty::Tuple(_) => self.type_name(t),
+            Ty::Tuple(_) | Ty::Opt(_) => self.type_name(t),
         }
     }
 
@@ -96,6 +96,14 @@ impl<'a> Gen<'a> {
                 self.types.insert(t, name.clone());
                 name
             }
+            Ty::Opt(inner) => {
+                let ic = self.cty(*inner);
+                let name = format!("SnO{}", self.types.len());
+                self.type_decls
+                    .push_str(&format!("typedef struct {{ bool has; {} v; }} {};\n", ic, name));
+                self.types.insert(t, name.clone());
+                name
+            }
             Ty::Tuple(items) => {
                 let mut fields = String::new();
                 for (i, it) in items.iter().enumerate() {
@@ -116,6 +124,10 @@ impl<'a> Gen<'a> {
 
     /// Compile an expression; a list literal adopts the element type of `hint`.
     pub(super) fn hinted(&mut self, e: &Expr, hint: Option<Ty>) -> R<E> {
+        let hint = match hint {
+            Some(Ty::Opt(i)) => Some(*i),
+            h => h,
+        };
         if let (ExprKind::Ident(n), Some(Ty::Func(ps, r))) = (&e.kind, hint) {
             if self.fns.contains_key(n.as_str()) && !self.var_exists(n) {
                 let v = self.func_value(n, Some(ps), e.span)?;
@@ -244,6 +256,9 @@ impl<'a> Gen<'a> {
 
     pub(super) fn index_expr(&mut self, base: &Expr, idx: &Expr, span: Span) -> R<E> {
         let b = self.val(base)?;
+        if let Ty::Opt(_) = b.ty {
+            return Err(self.null_use(b.ty, "index into", span));
+        }
         match b.ty {
             Ty::List(elem) => {
                 let i = self.val(idx)?;
@@ -429,6 +444,7 @@ impl<'a> Gen<'a> {
                 iter.span,
             );
         };
+        self.forget_assigned(body);
         let ln = self.type_name(l.ty);
         let ec = self.cty(*elem);
         let n = self.fresh();
@@ -468,6 +484,9 @@ impl<'a> Gen<'a> {
         span: Span,
     ) -> R<E> {
         let o = self.val(obj)?;
+        if let Ty::Opt(_) = o.ty {
+            return Err(self.null_use(o.ty, &format!("call '.{}()' on", name), span));
+        }
         if let Ty::Class(c) = o.ty {
             return self.call_method(o, c as usize, name, args, span, false);
         }
@@ -896,6 +915,12 @@ impl<'a> Gen<'a> {
                 } else {
                     format!("sn_buf_val_repr(&{}, {}); ", b, c)
                 }
+            }
+            Ty::Opt(inner) => {
+                let on = self.type_name(ty);
+                let n = self.fresh();
+                let some = self.buf_append(b, &format!("o{}.v", n), *inner, top);
+                format!("{{ {} o{} = {}; if (o{}.has) {{ {}}} else sn_buf_null(&{}, 0); }} ", on, n, c, n, some, b)
             }
             Ty::List(_) | Ty::Dict(..) | Ty::Tuple(_) => {
                 let f = self.fmt_fn(ty);

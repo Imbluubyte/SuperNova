@@ -226,6 +226,18 @@ impl<'a> Gen<'a> {
                     false,
                 ))
             }
+            "get" if args.len() == 1 => {
+                let k = self.val(&args[0].value)?;
+                self.key_check(k.ty, kt, args[0].value.span)?;
+                let oty = Ty::opt_of(vt);
+                let on = self.type_name(oty);
+                let (kc, vc) = (self.cty(kt), self.cty(vt));
+                Ok(E::new(
+                    format!("({{ {dn}* d{n} = {d}; {kc} k{n} = {k}; {on} r{n} = {{0}}; if ({dn}_has(d{n}, k{n})) {{ r{n}.has = true; r{n}.v = {dn}_getor(d{n}, k{n}, ({vc}){{0}}); }} r{n}; }})", dn = dn, n = n, d = o.c, kc = kc, k = k.c, on = on, vc = vc),
+                    oty,
+                    false,
+                ))
+            }
             "get" => {
                 want(2)?;
                 let k = self.val(&args[0].value)?;

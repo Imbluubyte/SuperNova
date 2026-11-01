@@ -1,0 +1,8 @@
+var n = 0
+repeat(10):
+	n += 1
+	if n == 2:
+		continue
+	if n == 4:
+		break
+print(n)

@@ -1,0 +1,73 @@
+class Node:
+	var value = 0
+	var next: Node? = null
+	fn onCreation(v: Int):
+		self.value = v
+
+fn find(xs: List[Int], t: Int) -> Int?:
+	for x in xs:
+		if x == t:
+			return x
+	return null
+
+var a = Node(1)
+a.next = Node(2)
+var cur: Node? = a
+var total = 0
+while cur != null:
+	total += cur.value
+	cur = cur.next
+print(total)
+var n: Int? = find([1, 2, 3], 2)
+print(n)
+print(find([1], 9))
+print(n ?? 0)
+print(find([1], 9) ?? -1)
+if n != null:
+	print(n + 1)
+print(n!)
+var xs = [1, 2, 3]
+if xs has 2:
+	print("has")
+if not (xs has 9):
+	print("no")
+var d = {"a": 1}
+if d has "a":
+	print("key")
+if "hello" has "ell":
+	print("sub")
+repeat(3):
+	print("Hi")
+var s: String? = null
+if s == null:
+	print("null s")
+s = "x"
+print(s.length())
+print(f"{s} {n}")
+fn f(n: Int?) -> Int:
+	if n == null:
+		return 0
+	return n + 1
+print(f(null))
+print(f(4))
+var d2 = {"a": 1}
+var g = d2.get("a")
+print(g)
+var xs2: List[Int]? = [1, 2]
+if xs2 != null:
+	print(xs2[1])
+	print(xs2.length())
+var t: Int? = 3
+if t == null or t > 2:
+	print("big")
+if t != null and t > 2:
+	print("big2")
+t = null
+print(t == null, t != null)
+var u: Int? = 3
+print(t == u, u == 3, u == null)
+var tm = 0
+repeat(2):
+	repeat(2):
+		tm += 1
+print(tm)

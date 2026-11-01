@@ -22,3 +22,4 @@ caught: cannot read 'no/such/file.txt': No such file or directory
 caught: slice 2..9 is out of range (string length 3; indexes start at 1)
 caught: string index 0 is out of range (length 3; indexes start at 1)
 caught: choice() needs a non-empty list
+true

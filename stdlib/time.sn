@@ -14,3 +14,9 @@ fn monotonic() -> Float:
 
 fn since(start: Float) -> Float:
 	return __monotonic() - start
+
+# Runs f once and returns how many seconds it took.
+fn measure(f: Fn()) -> Float:
+	var start = monotonic()
+	f()
+	return monotonic() - start

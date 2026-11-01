@@ -81,6 +81,29 @@ impl Parser {
             self.bump();
         }
     }
+    /// `repeat(` ... `):` at the start of a statement (`repeat` stays usable as a method name).
+    fn is_repeat_header(&self) -> bool {
+        if self.peek_at(1) != &Tok::LParen {
+            return false;
+        }
+        let mut depth = 0i32;
+        let mut i = 1;
+        loop {
+            match self.peek_at(i) {
+                Tok::LParen => depth += 1,
+                Tok::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self.peek_at(i + 1) == &Tok::Colon;
+                    }
+                }
+                Tok::Eof | Tok::Newline => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
     fn ident(&mut self, what: &str) -> PResult<String> {
         match self.peek().clone() {
             Tok::Ident(s) => {
@@ -158,6 +181,14 @@ impl Parser {
                     "'elif' is not part of SuperNova; use 'orif'",
                     span,
                 ))
+            }
+            Tok::Ident(ref n) if n == "repeat" && self.is_repeat_header() => {
+                self.bump();
+                self.expect(&Tok::LParen, "'('")?;
+                let count = self.expr()?;
+                self.expect(&Tok::RParen, "')'")?;
+                let body = self.block()?;
+                StmtKind::Repeat { count, body }
             }
             Tok::Var | Tok::Const => self.var_decl(false)?,
             Tok::Fn | Tok::Async => StmtKind::Fn(self.fn_decl()?),
@@ -496,7 +527,13 @@ impl Parser {
     }
 
     fn expr(&mut self) -> PResult<Expr> {
-        self.or_expr()
+        let l = self.or_expr()?;
+        if self.eat(&Tok::QQ) {
+            // right associative: a ?? b ?? c  is  a ?? (b ?? c)
+            let r = self.expr()?;
+            return Ok(self.bin(BinOp::Coalesce, l, r));
+        }
+        Ok(l)
     }
 
     fn bin(&self, op: BinOp, l: Expr, r: Expr) -> Expr {
@@ -546,6 +583,11 @@ impl Parser {
 
     fn cmp_expr(&mut self) -> PResult<Expr> {
         let l = self.range_expr()?;
+        if self.at(&Tok::Has) {
+            self.bump();
+            let r = self.range_expr()?;
+            return Ok(self.bin(BinOp::Has, l, r));
+        }
         if let Some(op) = self.cmp_op() {
             self.bump();
             let r = self.range_expr()?;
@@ -643,6 +685,10 @@ impl Parser {
                     let idx = self.expr()?;
                     self.expect(&Tok::RBracket, "']'")?;
                     e = Expr { kind: ExprKind::Index(Box::new(e), Box::new(idx)), span: sp };
+                }
+                Tok::Bang => {
+                    self.bump();
+                    e = Expr { kind: ExprKind::Force(Box::new(e)), span: sp };
                 }
                 Tok::Dot => {
                     self.bump();

@@ -18,6 +18,8 @@ mod dicts;
 mod async_;
 mod errors;
 mod funcs;
+mod optional;
+
 mod stdlib;
 use errors::{assigned_in_try, Jump, TryFrame};
 mod collections;
@@ -58,6 +60,8 @@ enum Ty {
     Task(&'static Ty),
     /// Function value: parameter types and return type (a plain C function pointer).
     Func(&'static [Ty], &'static Ty),
+    /// `T?`: a value that may be null (a `has` flag plus the value).
+    Opt(&'static Ty),
     Tuple(&'static [Ty]),
     /// Instance of a user class (index into `Gen::classes`); a reference to a heap object.
     Class(u32),
@@ -77,6 +81,7 @@ impl Ty {
             Ty::List(e) => format!("List[{}]", e.name()),
             Ty::Dict(k, v) => format!("Dict[{}, {}]", k.name(), v.name()),
             Ty::Task(t) => format!("Task[{}]", t.name()),
+            Ty::Opt(t) => format!("{}?", t.name()),
             Ty::Func(ps, r) => {
                 let params = ps.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ");
                 if *r == Ty::Void { format!("Fn({})", params) } else { format!("Fn({}) -> {}", params, r.name()) }
@@ -97,6 +102,7 @@ impl Ty {
             Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void | Ty::Func(..) => false,
             Ty::Str | Ty::Any | Ty::List(_) | Ty::Dict(..) | Ty::Task(_) | Ty::Class(_) => true,
             Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
+            Ty::Opt(t) => t.has_ptrs(),
         }
     }
     /// Types an `Any` can hold.
@@ -108,6 +114,13 @@ impl Ty {
     }
     fn func_of(ps: Vec<Ty>, r: Ty) -> Ty {
         Ty::Func(Box::leak(ps.into_boxed_slice()), Box::leak(Box::new(r)))
+    }
+    /// `T?`; an optional of an optional is the same optional, and `Any` already includes null.
+    fn opt_of(t: Ty) -> Ty {
+        match t {
+            Ty::Opt(_) | Ty::Any => t,
+            _ => Ty::Opt(Box::leak(Box::new(t))),
+        }
     }
     fn task_of(t: Ty) -> Ty {
         Ty::Task(Box::leak(Box::new(t)))
@@ -200,6 +213,10 @@ struct Ctx {
     is_async: bool,
     /// Locals that must be `volatile` because a try body assigns them.
     volatile: std::collections::HashSet<String>,
+    /// Optional variables known not to be null here: C name -> the value type.
+    narrowed: HashMap<String, Ty>,
+    /// Narrowings added by each open scope (removed when it closes).
+    narrow_added: Vec<Vec<String>>,
 }
 
 impl Ctx {
@@ -217,6 +234,8 @@ impl Ctx {
             try_stack: Vec::new(),
             is_async: false,
             volatile: std::collections::HashSet::new(),
+            narrowed: HashMap::new(),
+            narrow_added: vec![Vec::new()],
         }
     }
 }
@@ -320,6 +339,8 @@ fn op_sym(op: BinOp) -> &'static str {
         BinOp::Ge => ">=",
         BinOp::And => "and",
         BinOp::Or => "or",
+        BinOp::Has => "has",
+        BinOp::Coalesce => "??",
     }
 }
 
@@ -511,11 +532,29 @@ impl<'a> Gen<'a> {
                 }
                 Ok(Ty::tuple_of(v))
             }
-            TypeExpr::Optional(_) => nyi("optional types", span),
+            TypeExpr::Optional(t) => {
+                let inner = self.resolve_type(t, span)?;
+                if matches!(inner, Ty::Void | Ty::Null) {
+                    return err("only values can be optional", span);
+                }
+                Ok(Ty::opt_of(inner))
+            }
         }
     }
 
+    /// A variable as the program sees it at this point: an optional that has been
+    /// checked against null reads as its value type.
     fn lookup(&mut self, name: &str, span: Span) -> R<Var> {
+        let v = self.lookup_raw(name, span)?;
+        if !v.cname.starts_with('(') {
+            if let Some(&inner) = self.cx.narrowed.get(&v.cname) {
+                return Ok(Var { ty: inner, cname: format!("{}.v", v.cname), ..v });
+            }
+        }
+        Ok(v)
+    }
+
+    fn lookup_raw(&mut self, name: &str, span: Span) -> R<Var> {
         for sc in self.cx.scopes.iter().rev() {
             if let Some(v) = sc.get(name) {
                 return Ok(v.clone());
@@ -546,9 +585,20 @@ impl<'a> Gen<'a> {
     }
 
     /// Implicit conversions: Int -> Float, scalars -> Any, subclass -> superclass.
-    fn coerce(&self, c: String, from: Ty, to: Ty) -> Option<String> {
+    fn coerce(&mut self, c: String, from: Ty, to: Ty) -> Option<String> {
         if from == to {
             Some(c)
+        } else if let Ty::Opt(inner) = to {
+            if from == Ty::Null {
+                let n = self.type_name(to);
+                Some(format!("(({}){{0}})", n))
+            } else if matches!(from, Ty::Opt(_)) {
+                None
+            } else {
+                let ic = self.coerce(c, from, *inner)?;
+                let n = self.type_name(to);
+                Some(format!("(({}){{true, {}}})", n, ic))
+            }
         } else if from == Ty::Int && to == Ty::Float {
             Some(format!("((double)({}))", c))
         } else if to == Ty::Any && from.is_scalar() {
@@ -702,6 +752,17 @@ impl<'a> Gen<'a> {
     }
 
     fn call(&mut self, callee: &Expr, args: &[Arg], span: Span) -> R<E> {
+        let r = self.call_inner(callee, args, span);
+        // a called function may reassign a global, so what we knew about globals is stale
+        let builtin = matches!(&callee.kind, ExprKind::Ident(n)
+            if n.starts_with("__") || matches!(n.as_str(), "print" | "str" | "int" | "float" | "gcCollect" | "gcHeapBytes" | "sleep"));
+        if !builtin {
+            self.cx.narrowed.retain(|k, _| !k.starts_with("g_"));
+        }
+        r
+    }
+
+    fn call_inner(&mut self, callee: &Expr, args: &[Arg], span: Span) -> R<E> {
         if let ExprKind::Member(obj, method) = &callee.kind {
             if matches!(&obj.kind, ExprKind::Ident(n) if n == "super") {
                 return self.super_call(method, args, span);
@@ -1011,10 +1072,19 @@ impl<'a> Gen<'a> {
                     ),
                 }
             }
+            ExprKind::Binary(BinOp::Has, l, r) => self.has_expr(l, r, e.span),
+            ExprKind::Binary(BinOp::Coalesce, l, r) => self.coalesce(l, r, e.span),
+            ExprKind::Force(x) => self.force_expr(x, e.span),
             ExprKind::Binary(op, l, r) => {
-                let l = self.val(l)?;
-                let r = self.val(r)?;
-                self.binary(*op, l, r, e.span)
+                let lv = self.val(l)?;
+                let rv = match op {
+                    BinOp::And | BinOp::Or => {
+                        let n = self.cond_narrow(l, *op == BinOp::And);
+                        self.with_narrow(n, |g| g.val(r))?
+                    }
+                    _ => self.val(r)?,
+                };
+                self.binary(*op, lv, rv, e.span)
             }
             ExprKind::Call(callee, args) => self.call(callee, args, e.span),
             ExprKind::Await(inner) => self.await_expr(inner, e.span),
@@ -1063,6 +1133,19 @@ impl<'a> Gen<'a> {
         let pure = l.pure && r.pure;
         let loc = self.loc(span);
         let (lt, rt) = (l.ty, r.ty);
+        if matches!(op, Eq | Ne)
+            && (matches!(lt, Ty::Opt(_)) || matches!(rt, Ty::Opt(_)) || ((lt == Ty::Null) != (rt == Ty::Null)))
+            && lt != Ty::Any
+            && rt != Ty::Any
+        {
+            return self.opt_equality(op, l, r, span);
+        }
+        if let Ty::Opt(_) = lt {
+            return Err(self.null_use(lt, &format!("use '{}' on", op_sym(op)), span));
+        }
+        if let Ty::Opt(_) = rt {
+            return Err(self.null_use(rt, &format!("use '{}' on", op_sym(op)), span));
+        }
         if matches!(lt, Ty::Dict(..)) || matches!(rt, Ty::Dict(..)) {
             return err("dictionaries cannot be used with this operator or compared with ==", span);
         }
@@ -1210,11 +1293,13 @@ impl<'a> Gen<'a> {
 
     fn push_scope(&mut self) {
         self.cx.scopes.push(HashMap::new());
+        self.cx.narrow_added.push(Vec::new());
         self.cx.indent += 1;
     }
 
     fn pop_scope(&mut self) {
         self.cx.scopes.pop();
+        self.narrow_pop();
         self.cx.indent -= 1;
     }
 
@@ -1253,12 +1338,14 @@ impl<'a> Gen<'a> {
                     Some(t) => match self.coerce(v.c, v.ty, t) {
                         Some(c) => (c, t),
                         None => {
+                            let h = self.null_hint(v.ty, t);
                             return err(
                                 format!(
-                                    "cannot initialise '{}' of type {} with a value of type {}",
+                                    "cannot initialise '{}' of type {} with a value of type {}{}",
                                     name,
                                     t.name(),
-                                    v.ty.name()
+                                    v.ty.name(),
+                                    h
                                 ),
                                 s.span,
                             )
@@ -1308,7 +1395,11 @@ impl<'a> Gen<'a> {
                 let ExprKind::Ident(name) = &target.kind else {
                     return self.assign_other(target, *op, value, s.span);
                 };
-                let var = self.lookup(name, target.span)?;
+                let var = if op.is_none() {
+                    self.lookup_raw(name, target.span)?
+                } else {
+                    self.lookup(name, target.span)?
+                };
                 if var.is_const {
                     return err(format!("cannot assign to constant '{}'", name), s.span);
                 }
@@ -1326,18 +1417,26 @@ impl<'a> Gen<'a> {
                     } else {
                         ""
                     };
+                    let hint2 = self.null_hint(v.ty, var.ty);
                     return err(
                         format!(
-                            "cannot assign {} to '{}' which has type {}{}",
+                            "cannot assign {} to '{}' which has type {}{}{}",
                             v.ty.name(),
                             name,
                             var.ty.name(),
-                            hint
+                            hint,
+                            hint2
                         ),
                         s.span,
                     );
                 };
                 self.line(&format!("{} = {};", var.cname, c));
+                if op.is_none() && !var.cname.starts_with('(') {
+                    self.cx.narrowed.remove(&var.cname);
+                    if let (Ty::Opt(inner), false) = (var.ty, matches!(v.ty, Ty::Null | Ty::Opt(_))) {
+                        self.add_narrow(&var.cname, *inner);
+                    }
+                }
                 Ok(())
             }
             StmtKind::Expr(e) => {
@@ -1349,32 +1448,9 @@ impl<'a> Gen<'a> {
                 }
                 Ok(())
             }
-            StmtKind::If { branches, else_body } => {
-                for (i, (c, body)) in branches.iter().enumerate() {
-                    let cc = self.cond(c)?;
-                    if i == 0 {
-                        self.line(&format!("if ({}) {{", cc));
-                    } else {
-                        self.line(&format!("}} else if ({}) {{", cc));
-                    }
-                    self.block(body)?;
-                }
-                if let Some(e) = else_body {
-                    self.line("} else {");
-                    self.block(e)?;
-                }
-                self.line("}");
-                Ok(())
-            }
-            StmtKind::While { cond, body } => {
-                let cc = self.cond(cond)?;
-                self.line(&format!("while ({}) {{", cc));
-                self.cx.loop_depth += 1;
-                self.block(body)?;
-                self.cx.loop_depth -= 1;
-                self.line("}");
-                Ok(())
-            }
+            StmtKind::If { branches, else_body } => self.if_stmt(branches, else_body),
+            StmtKind::While { cond, body } => self.while_stmt(cond, body),
+            StmtKind::Repeat { count, body } => self.repeat_stmt(count, body),
             StmtKind::For { var, iter, body } => {
                 let ExprKind::Range { start, end, inclusive } = &iter.kind else {
                     return self.for_each(var, iter, body);
@@ -1391,6 +1467,7 @@ impl<'a> Gen<'a> {
                         iter.span,
                     );
                 }
+                self.forget_assigned(body);
                 let n = self.fresh();
                 let cname = format!("v_{}_{}", var, n);
                 self.line("{");

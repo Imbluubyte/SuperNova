@@ -749,6 +749,9 @@ impl<'a> Gen<'a> {
             return err("'super' can only be used as super.method(...)", span);
         }
         let o = self.val(obj)?;
+        if let Ty::Opt(_) = o.ty {
+            return Err(self.null_use(o.ty, &format!("read '.{}' of", name), span));
+        }
         let Ty::Class(c) = o.ty else {
             return err(format!("a value of type {} has no field '{}'", o.ty.name(), name), span);
         };

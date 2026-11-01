@@ -466,7 +466,7 @@ impl<'a> Rn<'a> {
                     self.expr(v)?;
                 }
             }
-            ExprKind::Unary(_, x) | ExprKind::Await(x) | ExprKind::Predicate(_, x) => self.expr(x)?,
+            ExprKind::Unary(_, x) | ExprKind::Await(x) | ExprKind::Force(x) | ExprKind::Predicate(_, x) => self.expr(x)?,
             ExprKind::Binary(_, l, r) | ExprKind::Index(l, r) => {
                 self.expr(l)?;
                 self.expr(r)?;
@@ -585,6 +585,10 @@ impl<'a> Rn<'a> {
                 if let Some(b) = default {
                     self.block(b, &[])?;
                 }
+            }
+            StmtKind::Repeat { count, body } => {
+                self.expr(count)?;
+                self.block(body, &[])?;
             }
             StmtKind::Return(Some(e)) | StmtKind::Throw(e) => self.expr(e)?,
             StmtKind::Return(None) | StmtKind::Break | StmtKind::Continue | StmtKind::Pass => {}
