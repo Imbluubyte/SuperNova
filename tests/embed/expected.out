@@ -1,0 +1,17 @@
+before init: 0 err=[sn_init() has not been called]
+script loaded
+init=1
+[host] started sword at 12.5
+addScore=5
+addScore=12
+State.Running score=12 items=["sword"]
+half=2.5
+running=1
+boom(2)=2
+boom(9)=0 err=[RuntimeError: list index 9 is out of range (length 3; indexes start at 1)
+  at game.sn:32:9]
+after error addScore=13 err=[]
+churn=3188895
+thread: addScore=1013
+churn from main again=988895
+final: State.Running score=1013 items=["sword"]

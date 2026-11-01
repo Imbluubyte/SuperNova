@@ -245,3 +245,31 @@ fn stack_overflow_inside_a_task_is_reported() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "before\n");
     assert!(String::from_utf8_lossy(&out.stderr).contains("stack overflow"));
 }
+
+#[test]
+fn library_builds_can_be_driven_by_a_c_host() {
+    let dir = std::env::temp_dir().join(format!("sn-embed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = root().join("embed");
+    let lib = dir.join("libgame.so");
+    let b = snc().arg("build").arg(src.join("game.sn")).arg("--lib").arg("-o").arg(&lib).output().unwrap();
+    assert!(b.status.success(), "lib build failed:\n{}", String::from_utf8_lossy(&b.stderr));
+    assert!(dir.join("libgame.h").exists(), "header was not written");
+    let host = dir.join("host");
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let c = Command::new(&cc).arg(src.join("host.c")).arg("-o").arg(&host).args(["-ldl", "-lpthread"]).output().unwrap();
+    assert!(c.status.success(), "host build failed:\n{}", String::from_utf8_lossy(&c.stderr));
+    let expected = std::fs::read_to_string(src.join("expected.out")).unwrap();
+    for stress in ["", "100"] {
+        let mut cmd = Command::new(&host);
+        cmd.current_dir(&dir);
+        if !stress.is_empty() {
+            cmd.env("SN_GC_STRESS", stress);
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "host failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        let got = String::from_utf8_lossy(&out.stdout).replace("game.sn:", "game.sn:");
+        assert_eq!(got, expected, "output differs (GC stress {:?})", stress);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

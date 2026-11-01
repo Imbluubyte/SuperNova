@@ -181,6 +181,14 @@ impl Parser {
                     }
                 }
             }
+            Tok::Ident(ref n) if (n == "extern" || n == "export") && self.peek_at(1) == &Tok::Fn => {
+                let is_extern = n == "extern";
+                self.bump();
+                let mut f = self.fn_decl_with(is_extern)?;
+                f.is_extern = is_extern;
+                f.is_export = !is_extern;
+                StmtKind::Fn(f)
+            }
             Tok::Ident(ref n) if n == "elif" => {
                 return Err(CompileError::new(
                     "'elif' is not part of SuperNova; use 'orif'",
@@ -371,6 +379,10 @@ impl Parser {
     }
 
     fn fn_decl(&mut self) -> PResult<FnDecl> {
+        self.fn_decl_with(false)
+    }
+
+    fn fn_decl_with(&mut self, is_extern: bool) -> PResult<FnDecl> {
         let span = self.span();
         let is_async = self.eat(&Tok::Async);
         self.expect(&Tok::Fn, "'fn'")?;
@@ -401,8 +413,8 @@ impl Parser {
         }
         self.expect(&Tok::RParen, "')'")?;
         let ret = if self.eat(&Tok::Arrow) { Some(self.type_expr()?) } else { None };
-        let body = self.block()?;
-        Ok(FnDecl { name, params, ret, body, is_async, is_private: false, span })
+        let body = if is_extern { Vec::new() } else { self.block()? };
+        Ok(FnDecl { name, params, ret, body, is_async, is_private: false, is_export: false, is_extern, span })
     }
 
     fn enum_decl(&mut self) -> PResult<EnumDecl> {

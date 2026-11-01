@@ -117,6 +117,10 @@ pub struct FnDecl {
     pub body: Vec<Stmt>,
     pub is_async: bool,
     pub is_private: bool,
+    /// `export fn`: callable by the host in a library build.
+    pub is_export: bool,
+    /// `extern fn`: provided by the host (no body).
+    pub is_extern: bool,
     pub span: Span,
 }
 

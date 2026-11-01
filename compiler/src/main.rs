@@ -22,7 +22,7 @@ const ASYNC_H: &str = include_str!("../../runtime/snasync.h");
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  snc check  <file.sn>\n  snc emit-c <file.sn>\n  snc build  <file.sn> [-o output]\n  snc run    <file.sn>\n  snc doctor     (check this installation)\n  snc version"
+        "usage:\n  snc check  <file.sn>\n  snc emit-c <file.sn>\n  snc build  <file.sn> [-o output] [--lib]\n  snc run    <file.sn>\n  snc doctor     (check this installation)\n  snc version"
     );
     exit(2);
 }
@@ -39,12 +39,16 @@ fn report(files: &[modules::SrcFile], e: &lexer::CompileError) -> ! {
 }
 
 fn compile_to_c(path: &str) -> String {
+    compile_with(path, false).0
+}
+
+fn compile_with(path: &str, lib: bool) -> (String, String) {
     let prog = match modules::load(path) {
         Ok(p) => p,
         Err((e, files)) => report(&files, &e),
     };
     let names: Vec<String> = prog.files.iter().map(|f| f.display.clone()).collect();
-    match codegen::generate(&prog.module, &names) {
+    match codegen::generate(&prog.module, &names, lib) {
         Ok(c) => c,
         Err(e) => report(&prog.files, &e),
     }
@@ -235,7 +239,15 @@ fn scratch_dir() -> PathBuf {
 }
 
 fn build(path: &str, out: &Path) {
-    let c = compile_to_c(path);
+    build_with(path, out, false)
+}
+
+fn build_with(path: &str, out: &Path, lib: bool) {
+    let (c, header) = compile_with(path, lib);
+    if lib {
+        let h = out.with_extension("h");
+        std::fs::write(&h, header).unwrap();
+    }
     let dir = scratch_dir();
     std::fs::write(dir.join("snrt.h"), RUNTIME_H).unwrap();
     std::fs::write(dir.join("sngc.h"), GC_H).unwrap();
@@ -245,6 +257,7 @@ fn build(path: &str, out: &Path) {
     let cc = find_cc();
     let status = Command::new(&cc)
         .args(["-O2", "-std=gnu11", "-fwrapv", "-fno-strict-aliasing", "-pthread", "-w"])
+        .args(if lib { vec!["-shared", "-fPIC", "-fvisibility=hidden"] } else { vec![] })
         .arg(&c_path)
         .arg("-o")
         .arg(out)
@@ -280,6 +293,10 @@ fn main() {
     if args.len() < 3 {
         usage();
     }
+    let mut args = args;
+    if args[2] == "--lib" && args.len() > 3 {
+        args.swap(2, 3);
+    }
     let path = &args[2];
     match args[1].as_str() {
         "check" => {
@@ -289,11 +306,15 @@ fn main() {
         "emit-c" => print!("{}", compile_to_c(path)),
         "build" => {
             let mut out: Option<PathBuf> = None;
+            let mut lib = false;
             let mut i = 3;
             while i < args.len() {
                 if args[i] == "-o" && i + 1 < args.len() {
                     out = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
+                } else if args[i] == "--lib" {
+                    lib = true;
+                    i += 1;
                 } else {
                     usage();
                 }
@@ -301,7 +322,7 @@ fn main() {
             let out = out.unwrap_or_else(|| {
                 PathBuf::from(Path::new(path).file_stem().unwrap_or_default())
             });
-            build(path, &out);
+            build_with(path, &out, lib);
         }
         "run" => {
             let exe = std::env::temp_dir().join(format!("snrun-{}", std::process::id()));

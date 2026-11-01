@@ -1,0 +1,41 @@
+extern fn hostLog(msg: String)
+extern fn hostTime() -> Float
+
+enum State:
+	Idle
+	Running
+
+var score = 0
+var state = State.Idle
+var items: List[String] = []
+
+export fn start(name: String):
+	state = State.Running
+	items.add(name)
+	hostLog(f"started {name} at {hostTime()}")
+
+export fn addScore(n: Int) -> Int:
+	score += n
+	return score
+
+export fn describe() -> String:
+	return f"{state} score={score} items={items}"
+
+export fn half(x: Float) -> Float:
+	return x / 2.0
+
+export fn isRunning() -> Bool:
+	return state == State.Running
+
+export fn boom(i: Int) -> Int:
+	var xs = [1, 2, 3]
+	return xs[i]
+
+export fn churn(n: Int) -> Int:
+	var total = 0
+	for i in 1..n:
+		var s = f"item {i}"
+		total += s.length()
+	return total
+
+print("script loaded")

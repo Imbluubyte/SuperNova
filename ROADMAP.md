@@ -13,6 +13,7 @@
 - [x] 9. async/await (stackful coroutines, timers, background file I/O)
 - [x] 10. Standard library (strings, std.math, std.random, std.time, std.sys, std.fs) and first-class functions
 - [x] 10b. Optional types, null safety, `has`, `repeat`, `time.measure`
+- [x] 10c. Lambdas, enums, host embedding (`extern fn`, `export fn`, `snc build --lib`)
 - [ ] 11. Termux build and on-device testing
 - [ ] 12. Optimisation passes and benchmarks
 - [ ] 13. Nebula integration interface

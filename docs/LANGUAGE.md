@@ -353,6 +353,11 @@ An enum is a separate type: it cannot be mixed with Int or another enum, and onl
 integer literals). `.name` is the variant's name and `.value` its Int. Enums are declared at the
 top level of a file, can be `private`, and are used from other modules as `mod.Direction.Up`.
 
+## Host interface
+
+`extern fn name(params) -> T` (no body) declares a function provided by a host program, and
+`export fn` marks a function the host may call; see [EMBEDDING.md](EMBEDDING.md).
+
 ## Standard library
 
 Modules shipped inside the compiler; import them with `use std.<name>`:

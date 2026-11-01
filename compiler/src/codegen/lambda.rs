@@ -201,6 +201,8 @@ impl<'a> Gen<'a> {
 				body: vec![Stmt { kind, span: sp }],
 				is_async: false,
 				is_private: false,
+				is_export: false,
+				is_extern: false,
 				span,
 			};
 			let decl: &'a FnDecl = Box::leak(Box::new(decl));
