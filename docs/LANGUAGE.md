@@ -329,3 +329,8 @@ The sources are in `stdlib/*.sn` and are ordinary SuperNova modules built on a s
 `__name` compiler intrinsics (not for use in programs). `readText`/`writeText` block; use the
 built-in `await readFile(...)` / `await writeFile(...)` for background I/O. `math.min(a, b)`
 needs both arguments to have the same type.
+
+## Error messages
+
+Compile errors show `file:line:col`, the source line and a caret. Misspelled variables, functions,
+fields and methods (including string and dictionary methods) get a `did you mean 'x'?` hint.

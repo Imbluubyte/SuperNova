@@ -1,0 +1,3 @@
+fn computeTotal(a: Int) -> Int:
+	return a
+print(computeTotl(1))

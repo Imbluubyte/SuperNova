@@ -581,7 +581,17 @@ impl<'a> Gen<'a> {
         if name == "super" {
             return err("'super' can only be used as super.method(...)", span);
         }
-        err(format!("undefined variable '{}'", name), span)
+        let mut names: Vec<String> = Vec::new();
+        for sc in &self.cx.scopes {
+            names.extend(sc.keys().cloned());
+        }
+        names.extend(self.globals.keys().cloned());
+        names.extend(self.fns.keys().map(|k| k.to_string()));
+        if let Some(cc) = self.cx.cur_class {
+            names.extend(self.classes[cc].fields.iter().map(|f| f.name.clone()));
+        }
+        let hint = did_you_mean(name, names.iter().map(|s| s.as_str()));
+        err(format!("undefined variable '{}'{}", name, hint), span)
     }
 
     /// Implicit conversions: Int -> Float, scalars -> Any, subclass -> superclass.
@@ -800,7 +810,10 @@ impl<'a> Gen<'a> {
             }
         }
         let Some(&decl) = self.fns.get(name) else {
-            return err(format!("undefined function '{}'", name), span);
+            let mut names: Vec<&str> = self.fns.keys().map(|k| k.as_str()).collect();
+            names.extend(["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "min", "max", "sum", "abs", "len"]);
+            let hint = did_you_mean(name, names);
+            return err(format!("undefined function '{}'{}", name, hint), span);
         };
         let bound = self.bind_args(decl, name, args, span)?;
         let (cname, ret) = self.instance(decl, bound.ptys.clone(), span)?;
@@ -1619,5 +1632,44 @@ impl<'a> Gen<'a> {
             }
             _ => err("'case' patterns must be literal values in V1", e.span),
         }
+    }
+}
+
+
+/// Edit distance between two short names (for "did you mean" hints).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// " (did you mean 'x'?)" when one of `candidates` is close to `name`, else "".
+pub(crate) fn did_you_mean<'s>(name: &str, candidates: impl IntoIterator<Item = &'s str>) -> String {
+    let name_l = name.to_lowercase();
+    let limit = if name.len() <= 3 { 1 } else if name.len() <= 7 { 2 } else { 3 };
+    let mut best: Option<(usize, String)> = None;
+    for c in candidates {
+        let c = crate::modules::bare_name(c);
+        let c = c.as_str();
+        if c == name || c.starts_with("__") || c.is_empty() {
+            continue;
+        }
+        let d = if c.to_lowercase() == name_l { 0 } else { edit_distance(name, c) };
+        if d <= limit && best.as_ref().map_or(true, |(bd, _)| d < *bd) {
+            best = Some((d, c.to_string()));
+        }
+    }
+    match best {
+        Some((_, c)) => format!(" (did you mean '{}'?)", c),
+        None => String::new(),
     }
 }

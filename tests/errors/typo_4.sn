@@ -1,0 +1,4 @@
+class P:
+	var health = 1
+var p = P()
+print(p.helth)

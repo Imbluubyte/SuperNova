@@ -274,9 +274,10 @@ impl<'a> Gen<'a> {
             }
             _ => err(
                 format!(
-                    "{} has no method '{}' (available: length, keys, values, contains, get, remove, merge, clear)",
+                    "{} has no method '{}'{} (available: length, keys, values, contains, get, remove, merge, clear)",
                     o.ty.name(),
-                    name
+                    name,
+                    super::did_you_mean(name, ["length", "keys", "values", "contains", "get", "remove", "merge", "clear"])
                 ),
                 span,
             ),

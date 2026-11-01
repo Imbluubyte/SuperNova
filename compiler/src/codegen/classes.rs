@@ -550,7 +550,13 @@ impl<'a> Gen<'a> {
             let hint = if self.classes[class].fields.iter().any(|f| f.name == name) {
                 format!(" ('{}' is a field, not a method)", name)
             } else {
-                String::new()
+                let mut names: Vec<String> = Vec::new();
+                let mut k = Some(class);
+                while let Some(i) = k {
+                    names.extend(self.classes[i].methods.keys().map(|s| s.to_string()));
+                    k = self.classes[i].parent;
+                }
+                super::did_you_mean(name, names.iter().map(|s| s.as_str()))
             };
             return err(format!("class '{}' has no method '{}'{}", cls_name, name, hint), span);
         };
@@ -767,7 +773,13 @@ impl<'a> Gen<'a> {
             let hint = if self.find_method(c, name).is_some() {
                 format!(" ('{}' is a method; call it as {}(...))", name, name)
             } else {
-                String::new()
+                let mut names: Vec<String> = Vec::new();
+                let mut k = Some(c);
+                while let Some(i) = k {
+                    names.extend(self.classes[i].fields.iter().map(|f| f.name.clone()));
+                    k = self.classes[i].parent;
+                }
+                super::did_you_mean(name, names.iter().map(|s| s.as_str()))
             };
             return err(
                 format!("class '{}' has no field '{}'{}", self.classes[c].name, name, hint),

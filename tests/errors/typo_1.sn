@@ -1,0 +1,6 @@
+class Player:
+	var health = 100
+	fn heal():
+		health += 1
+var p = Player()
+p.heel()

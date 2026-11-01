@@ -99,8 +99,9 @@ impl<'a> Gen<'a> {
             _ => {
                 return err(
                     format!(
-                        "String has no method '{}' (available: length, upper, lower, trim, contains, startsWith, endsWith, find, replace, slice, repeat, split, chars)",
-                        name
+                        "String has no method '{}'{} (available: length, upper, lower, trim, contains, startsWith, endsWith, find, replace, slice, repeat, split, chars)",
+                        name,
+                        super::did_you_mean(name, ["length", "upper", "lower", "trim", "contains", "startsWith", "endsWith", "find", "replace", "slice", "repeat", "split", "chars"])
                     ),
                     span,
                 )

@@ -161,9 +161,12 @@ static int sn_fmt_float(char *out, double v) {
 }
 
 static inline void sn_buf_int(SnBuf *b, int64_t v) {
-    char t[32];
-    int n = snprintf(t, sizeof t, "%" PRId64, v);
-    sn_buf_text(b, t, n);
+    char t[24];
+    char *e = t + sizeof t, *p = e;
+    uint64_t u = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+    do { *--p = (char)('0' + u % 10); u /= 10; } while (u);
+    if (v < 0) *--p = '-';
+    sn_buf_text(b, p, (int)(e - p));
 }
 static inline void sn_buf_float(SnBuf *b, double v) {
     char t[48];
