@@ -1,0 +1,4 @@
+fn inc(x: Int) -> Int:
+	return x + 1
+var f: Fn(Int) -> Int = inc
+print(f(1, 2))

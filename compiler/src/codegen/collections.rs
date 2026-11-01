@@ -46,6 +46,7 @@ impl<'a> Gen<'a> {
             Ty::Any => "SnVal".into(),
             Ty::Class(c) => format!("SnO_{}*", c),
             Ty::Task(_) => "SnTask*".into(),
+            Ty::Func(..) => self.type_name(t),
             Ty::List(_) | Ty::Dict(..) => format!("{}*", self.type_name(t)),
             Ty::Tuple(_) => self.type_name(t),
         }
@@ -79,6 +80,22 @@ impl<'a> Gen<'a> {
                 name
             }
             Ty::Dict(kt, vt) => self.dict_type_name(*kt, *vt),
+            Ty::Func(ps, r) => {
+                let mut params = Vec::new();
+                for p in ps.iter() {
+                    params.push(self.cty(*p));
+                }
+                let rc = self.cty(*r);
+                let name = format!("SnFn{}", self.types.len());
+                self.type_decls.push_str(&format!(
+                    "typedef {} (*{})({});\n",
+                    rc,
+                    name,
+                    if params.is_empty() { "void".to_string() } else { params.join(", ") }
+                ));
+                self.types.insert(t, name.clone());
+                name
+            }
             Ty::Tuple(items) => {
                 let mut fields = String::new();
                 for (i, it) in items.iter().enumerate() {
@@ -99,6 +116,18 @@ impl<'a> Gen<'a> {
 
     /// Compile an expression; a list literal adopts the element type of `hint`.
     pub(super) fn hinted(&mut self, e: &Expr, hint: Option<Ty>) -> R<E> {
+        if let (ExprKind::Ident(n), Some(Ty::Func(ps, r))) = (&e.kind, hint) {
+            if self.fns.contains_key(n.as_str()) && !self.var_exists(n) {
+                let v = self.func_value(n, Some(ps), e.span)?;
+                if v.ty != Ty::func_of(ps.to_vec(), *r) {
+                    return err(
+                        format!("function '{}' has type {}, but {} is expected here", n, v.ty.name(), hint.unwrap().name()),
+                        e.span,
+                    );
+                }
+                return Ok(v);
+            }
+        }
         if let (ExprKind::List(items), Some(Ty::List(inner))) = (&e.kind, hint) {
             return self.list_literal(items, Some(*inner), e.span);
         }
@@ -254,7 +283,16 @@ impl<'a> Gen<'a> {
                     idx.span,
                 ),
             },
-            Ty::Str => nyi("string indexing", span),
+            Ty::Str => {
+                let i = self.val(idx)?;
+                if i.ty != Ty::Int {
+                    return err(format!("string index must be Int, got {}", i.ty.name()), idx.span);
+                }
+                let loc = self.loc(span);
+                let pure = b.pure && i.pure;
+                let c = self.seq2(&b, &i, move |a, x| format!("sn_str_at({}, {}, {})", a, x, loc));
+                Ok(E::new(c, Ty::Str, pure))
+            }
             other => err(format!("a value of type {} cannot be indexed", other.name()), span),
         }
     }
@@ -436,6 +474,9 @@ impl<'a> Gen<'a> {
         if let Ty::Dict(kt, vt) = o.ty {
             return self.dict_method(o, (*kt, *vt), name, args, span);
         }
+        if o.ty == Ty::Str {
+            return self.str_method(o, name, args, span);
+        }
         let Ty::List(elem_ref) = o.ty else {
             return err(format!("{} has no method '{}'", o.ty.name(), name), span);
         };
@@ -449,6 +490,9 @@ impl<'a> Gen<'a> {
         let n = self.fresh();
         let l = format!("l{}", n);
         let head = format!("{}* {} = {};", ln, l, o.c);
+        if matches!(name, "map" | "each" | "reduce" | "any" | "all" | "join") {
+            return self.list_functional(o, elem, name, args, span);
+        }
         match name {
             "length" => {
                 expect_args(name, args, 0, span)?;
@@ -661,7 +705,7 @@ impl<'a> Gen<'a> {
                 }
                 type_test(target, &x)
             }
-            ExprKind::Ident(name) if self.fns.contains_key(name) => {
+            ExprKind::Ident(name) if self.fns.contains_key(name) || self.var_exists(name) => {
                 // Lower to the call `name($x, $p0, ...)` where `$x` is the current element and
                 // the extra arguments are evaluated once, before the loop.
                 let mut scope: HashMap<String, Var> = HashMap::new();
@@ -878,6 +922,7 @@ impl<'a> Gen<'a> {
                 }
             }
             Ty::Task(_) => format!("sn_buf_text(&{}, \"<Task>\", 6); ", b),
+            Ty::Func(..) => format!("sn_buf_text(&{}, \"<function>\", 10); ", b),
             Ty::Void => String::new(),
         }
     }

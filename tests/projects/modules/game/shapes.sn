@@ -3,27 +3,27 @@ use utils.mathx as m
 print("shapes loaded")
 
 class Shape:
-    var name = "shape"
-    fn onCreation(name: String):
-        self.name = name
-    fn area() -> Float:
-        return 0.0
-    fn describe() -> String:
-        return f"{name} with area {area()}"
+	var name = "shape"
+	fn onCreation(name: String):
+		self.name = name
+	fn area() -> Float:
+		return 0.0
+	fn describe() -> String:
+		return f"{name} with area {area()}"
 
 class Circle extends Shape:
-    var r = 1.0
-    fn onCreation(r: Float):
-        super.onCreation("circle")
-        self.r = r
-    fn area() -> Float:
-        return m.area(r)
+	var r = 1.0
+	fn onCreation(r: Float):
+		super.onCreation("circle")
+		self.r = r
+	fn area() -> Float:
+		return m.area(r)
 
 private class Hidden:
-    var x = 1
+	var x = 1
 
 fn make(r: Float) -> Circle:
-    return Circle(r)
+	return Circle(r)
 
 # a module-level name that is also a field name inside classes
 var name = "global name"

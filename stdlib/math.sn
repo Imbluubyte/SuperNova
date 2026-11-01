@@ -1,0 +1,113 @@
+# std.math: numbers and functions on them.
+#   use std.math
+#   print(math.sqrt(2.0), math.PI, math.max(3, 9))
+
+const PI = 3.141592653589793
+const E = 2.718281828459045
+const TAU = 6.283185307179586
+
+fn sqrt(x: Float) -> Float:
+	return __sqrt(x)
+
+fn pow(x: Float, y: Float) -> Float:
+	return __pow(x, y)
+
+fn exp(x: Float) -> Float:
+	return __exp(x)
+
+fn log(x: Float) -> Float:
+	return __log(x)
+
+fn log10(x: Float) -> Float:
+	return __log10(x)
+
+fn log2(x: Float) -> Float:
+	return __log(x) / __log(2.0)
+
+fn sin(x: Float) -> Float:
+	return __sin(x)
+
+fn cos(x: Float) -> Float:
+	return __cos(x)
+
+fn tan(x: Float) -> Float:
+	return __tan(x)
+
+fn asin(x: Float) -> Float:
+	return __asin(x)
+
+fn acos(x: Float) -> Float:
+	return __acos(x)
+
+fn atan(x: Float) -> Float:
+	return __atan(x)
+
+fn atan2(y: Float, x: Float) -> Float:
+	return __atan2(y, x)
+
+fn hypot(a: Float, b: Float) -> Float:
+	return __sqrt(a * a + b * b)
+
+fn toRadians(degrees: Float) -> Float:
+	return degrees * PI / 180.0
+
+fn toDegrees(radians: Float) -> Float:
+	return radians * 180.0 / PI
+
+# rounding: these return Int
+fn floor(x: Float) -> Int:
+	return __floor(x)
+
+fn ceil(x: Float) -> Int:
+	return __ceil(x)
+
+fn round(x: Float) -> Int:
+	return __round(x)
+
+fn trunc(x: Float) -> Int:
+	return __trunc(x)
+
+fn isNaN(x: Float) -> Bool:
+	return __isNaN(x)
+
+# the next functions work on Int or Float (both arguments the same type)
+fn abs(x):
+	if x < 0:
+		return -x
+	return x
+
+fn min(a, b):
+	if b < a:
+		return b
+	return a
+
+fn max(a, b):
+	if b > a:
+		return b
+	return a
+
+fn clamp(x, low, high):
+	if x < low:
+		return low
+	if x > high:
+		return high
+	return x
+
+fn sign(x) -> Int:
+	if x < 0:
+		return -1
+	if x > 0:
+		return 1
+	return 0
+
+fn gcd(a: Int, b: Int) -> Int:
+	var x = abs(a)
+	var y = abs(b)
+	while y != 0:
+		var t = x % y
+		x = y
+		y = t
+	return x
+
+fn lerp(a: Float, b: Float, t: Float) -> Float:
+	return a + (b - a) * t

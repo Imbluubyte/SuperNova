@@ -1,12 +1,11 @@
 # SuperNova language reference (implemented subset)
 
 Everything here is implemented and covered by tests in `tests/`. Syntax that
-parses but is not yet implemented (optional types,
-first-class functions) is rejected with a "not implemented yet"
+parses but is not yet implemented (optional types) is rejected with a "not implemented yet"
 compile error rather than silently misbehaving.
 
 ## Basics
-* Indentation-based blocks (4 spaces; tabs are rejected), `#` comments, no semicolons.
+* Indentation-based blocks (use one tab per level; spaces also work, but a file must not mix the two), `#` comments, no semicolons.
 * `var` declares a mutable variable, `const` an immutable one. Both require an initialiser.
 * Types: `Int` (64-bit), `Float` (64-bit), `Bool`, `String`, `null`.
   Types are inferred; annotations are optional: `var x: Float = 5`.
@@ -28,25 +27,25 @@ compile error rather than silently misbehaving.
 ## Control flow
 ```
 if a:
-    ...
+	...
 orif b:
-    ...
+	...
 else:
-    ...
+	...
 
 while cond:
-    ...
+	...
 
 for i in 1..10:      # inclusive: 1,2,...,10
-    ...
+	...
 for i in 1..<10:     # exclusive end: 1,2,...,9
-    ...
+	...
 
 match value:
-    case "x":
-        ...
-    default:
-        ...
+	case "x":
+		...
+	default:
+		...
 ```
 * Conditions must be `Bool`. `break` and `continue` work in `while` and `for`.
 * `for` currently iterates ranges only. The loop variable is a constant.
@@ -55,10 +54,10 @@ match value:
 ## Functions
 ```
 fn add(a, b):                 # unannotated parameters are generic
-    return a + b
+	return a + b
 
 fn greet(who: String, punct: String = "!") -> String:
-    return "Hi " + who + punct
+	return "Hi " + who + punct
 
 greet("Ana", punct="?")       # named arguments
 ```
@@ -77,7 +76,7 @@ print(numbers[1], numbers[3])      # 1-based: 10 30
 numbers[2] = 25
 var empty: List[Int] = []          # empty lists need an annotation
 for n in numbers:
-    print(n)
+	print(n)
 ```
 * Indexing is **1-based**. Index 0, indexes past the end and negative indexes are runtime errors that name the index and the length. There is no negative indexing.
 * The element type is fixed at compile time. `[1, 2, 3]` is a `List[Int]` stored as a contiguous `int64` array; `[1, 2.5]` is a `List[Float]` (Int widens); a list mixing Int/Float/Bool/String/null is a mixed list (`Any` elements, 16-byte tagged values). `add` of a value that does not fit is a compile error, so representation never changes behind your back.
@@ -101,7 +100,7 @@ A comparison predicate such as `< 4` is a dedicated syntactic form, valid only a
 ## Tuples
 ```
 fn getPosition():
-    return 10, 20
+	return 10, 20
 var position = getPosition()
 print(position[1], position[2])     # 1-based
 ```
@@ -122,16 +121,16 @@ Printed as `RuntimeError: <message>` with `at file.sn:line:col`, exit code 1.
 
 ```
 class Entity:
-    var hp = 10
-    private var secret = 1
-    fn onCreation(hp: Int = 10):
-        self.hp = hp
-    fn describe():
-        return f"entity {hp}"
+	var hp = 10
+	private var secret = 1
+	fn onCreation(hp: Int = 10):
+		self.hp = hp
+	fn describe():
+		return f"entity {hp}"
 
 class Goblin extends Entity:
-    fn describe():                      # override
-        return "goblin " + super.describe()
+	fn describe():                      # override
+		return "goblin " + super.describe()
 
 var g = Goblin(5)
 print(g.describe())
@@ -154,7 +153,7 @@ ages["bob"] += 1             # the key must already exist
 print(ages["ada"])           # a missing key is a runtime error
 var counts: Dict[String, Int] = {}     # empty dictionaries need an annotation
 for name in ages:            # iterates keys, in insertion order
-    print(name, ages[name])
+	print(name, ages[name])
 ```
 
 - Keys are `Int`, `String` or `Bool`; values can be any type (mixed values become `Any`, like mixed lists).
@@ -170,8 +169,8 @@ for name in ages:            # iterates keys, in insertion order
 const PI = 3.14159
 private var calls = 0          # not visible to importers
 fn square(x):
-    calls += 1
-    return x * x
+	calls += 1
+	return x * x
 
 # main.sn
 use utils.mathx                # loads utils/mathx.sn; namespace is `mathx`
@@ -193,16 +192,16 @@ var s: sh.Shape = c            # ...including in type annotations and `extends s
 
 ```
 fn withdraw(balance: Int, n: Int) -> Int:
-    if n > balance:
-        throw f"insufficient funds: {balance} < {n}"
-    return balance - n
+	if n > balance:
+		throw f"insufficient funds: {balance} < {n}"
+	return balance - n
 
 try:
-    print(withdraw(10, 40))
+	print(withdraw(10, 40))
 catch e:                       # e is a String
-    print("failed:", e)
+	print("failed:", e)
 finally:
-    print("always runs")       # also on return, break and continue
+	print("always runs")       # also on return, break and continue
 ```
 
 - `throw` takes a `String` message (use `str(x)` for other values). Runtime errors (bad index, missing dictionary key, division by zero, failed `int("abc")`, ...) are caught the same way; `e` is the message without the source location.
@@ -215,13 +214,13 @@ finally:
 
 ```
 async fn fetchSquare(x: Int) -> Int:
-    await sleep(0.1)                   # does not block other tasks
-    return x * x
+	await sleep(0.1)                   # does not block other tasks
+	return x * x
 
 async fn main2():
-    var a = fetchSquare(3)             # starts a task, returns a Task[Int]
-    var b = fetchSquare(4)             # both run concurrently
-    print(await a + await b)           # 25 after ~0.1 s, not 0.2 s
+	var a = fetchSquare(3)             # starts a task, returns a Task[Int]
+	var b = fetchSquare(4)             # both run concurrently
+	print(await a + await b)           # 25 after ~0.1 s, not 0.2 s
 
 await main2()                          # `await` is allowed at the top level of a file
 var text = await readFile("notes.txt")     # file I/O runs in the background
@@ -235,3 +234,66 @@ var text = await readFile("notes.txt")     # file I/O runs in the background
 - Only one task runs at a time, so tasks never race on your data. A task that loops forever without awaiting blocks all others.
 - Each task has a 256 KiB stack (override with env `SN_TASK_STACK_KB`), so very deep recursion inside a task reports "stack overflow" sooner than on the main stack.
 - Supported on x86-64 and ARM64.
+
+## Strings
+
+Strings are immutable byte strings: `length` and indexes count bytes (so they are
+exact for ASCII), `upper`/`lower` change ASCII letters only. Indexes start at 1.
+
+```
+var s = "  Hello, World  "
+var t = s.trim()                 # "Hello, World"
+print(t.length(), t.upper(), t[1], t.slice(1, 5))     # 12 HELLO, WORLD H Hello
+print(t.contains("World"), t.startsWith("He"), t.endsWith("x"))
+print(t.find("o"), t.find("o", 6), t.find("zzz"))      # 5 9 0   (0 = not found)
+print(t.replace("l", "L"), "ab".repeat(3))
+print("a,b,c".split(","), "abc".chars())               # lists of Strings
+print(["x", "y"].join("-"), [1, 2, 3].join(", "))      # join works on lists of anything
+```
+
+`slice(from, to)` is inclusive like a range; `s[i]` is a one-character String. Out of range
+indexes are runtime errors (catchable).
+
+## Functions as values
+
+```
+fn double(x: Int) -> Int:
+	return x * 2
+
+fn apply(f: Fn(Int) -> Int, x: Int) -> Int:
+	return f(x)
+
+var f: Fn(Int) -> Int = double
+print(f(4), apply(double, 5))
+var ops: List[Fn(Int) -> Int] = [double, double]
+print([1, 2, 3].map(double), [1, 2, 3].reduce(0, add))
+```
+
+- The type is written `Fn(ParamTypes) -> ReturnType` (leave off `-> ...` for none).
+- A function name becomes a value wherever a function type is expected: variables, parameters, return values, list/dictionary elements, object fields. A function with untyped parameters needs that context (or annotated parameters) so the compiler knows which version to use.
+- A value is a plain function pointer, so calling it costs the same as a direct call. `f(x)`, `table["add"](1, 2)` and `obj.callback(x)` all work. Async functions can be values too (`Fn(Int) -> Task[Int]`).
+- There are no lambdas in V1: only names of top-level functions.
+- List methods taking functions: `map(f)`, `each(f)`, `reduce(start, f)`, `any(f)`, `all(f)`; `filter(f)` also accepts a function variable.
+
+## Standard library
+
+Modules shipped inside the compiler; import them with `use std.<name>`:
+
+| Module | Contents |
+| --- | --- |
+| `std.math` | `PI E TAU`, `sqrt pow exp log log2 log10 sin cos tan asin acos atan atan2 hypot`, `floor ceil round trunc` (return Int), `abs min max clamp sign` (Int or Float), `gcd lerp toRadians toDegrees isNaN` |
+| `std.random` | `seed random randInt randFloat chance choice shuffle` |
+| `std.time` | `now monotonic since` |
+| `std.sys` | `args exit getEnv hasEnv write readLine input` |
+| `std.fs` | `readText writeText appendText exists readLines` |
+
+```
+use std.math
+use std.random
+print(math.sqrt(2.0), math.max(3, 9), random.randInt(1, 6))
+```
+
+The sources are in `stdlib/*.sn` and are ordinary SuperNova modules built on a small set of
+`__name` compiler intrinsics (not for use in programs). `readText`/`writeText` block; use the
+built-in `await readFile(...)` / `await writeFile(...)` for background I/O. `math.min(a, b)`
+needs both arguments to have the same type.

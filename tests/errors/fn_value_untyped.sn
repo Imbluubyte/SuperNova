@@ -1,0 +1,4 @@
+fn inc(x):
+	return x + 1
+var f: Fn(Int) -> Int = inc
+var g = inc

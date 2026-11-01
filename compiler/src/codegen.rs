@@ -17,6 +17,8 @@ mod classes;
 mod dicts;
 mod async_;
 mod errors;
+mod funcs;
+mod stdlib;
 use errors::{assigned_in_try, Jump, TryFrame};
 mod collections;
 
@@ -54,6 +56,8 @@ enum Ty {
     Dict(&'static Ty, &'static Ty),
     /// Handle to a running `async fn` call (or timer / file operation).
     Task(&'static Ty),
+    /// Function value: parameter types and return type (a plain C function pointer).
+    Func(&'static [Ty], &'static Ty),
     Tuple(&'static [Ty]),
     /// Instance of a user class (index into `Gen::classes`); a reference to a heap object.
     Class(u32),
@@ -73,6 +77,10 @@ impl Ty {
             Ty::List(e) => format!("List[{}]", e.name()),
             Ty::Dict(k, v) => format!("Dict[{}, {}]", k.name(), v.name()),
             Ty::Task(t) => format!("Task[{}]", t.name()),
+            Ty::Func(ps, r) => {
+                let params = ps.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ");
+                if *r == Ty::Void { format!("Fn({})", params) } else { format!("Fn({}) -> {}", params, r.name()) }
+            }
             Ty::Tuple(items) => format!(
                 "Tuple[{}]",
                 items.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
@@ -86,7 +94,7 @@ impl Ty {
     /// never scans storage of pointer-free types).
     fn has_ptrs(self) -> bool {
         match self {
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void => false,
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void | Ty::Func(..) => false,
             Ty::Str | Ty::Any | Ty::List(_) | Ty::Dict(..) | Ty::Task(_) | Ty::Class(_) => true,
             Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
         }
@@ -97,6 +105,9 @@ impl Ty {
     }
     fn list_of(elem: Ty) -> Ty {
         Ty::List(Box::leak(Box::new(elem)))
+    }
+    fn func_of(ps: Vec<Ty>, r: Ty) -> Ty {
+        Ty::Func(Box::leak(ps.into_boxed_slice()), Box::leak(Box::new(r)))
     }
     fn task_of(t: Ty) -> Ty {
         Ty::Task(Box::leak(Box::new(t)))
@@ -408,7 +419,7 @@ impl<'a> Gen<'a> {
         out.push_str(&self.bodies);
         out.push_str("static void sn_main(void) {\n");
         out.push_str(&main_body);
-        out.push_str("}\n\nint main(void) {\n    sn_gc_init(__builtin_frame_address(0));\n");
+        out.push_str("}\n\nint main(int argc, char **argv) {\n    sn_argc = argc;\n    sn_argv = argv;\n    sn_gc_init(__builtin_frame_address(0));\n");
         out.push_str("    sn_gc_root(&sn_exc, sizeof(sn_exc));\n");
         for g in &self.global_roots {
             out.push_str(&format!("    sn_gc_root(&{0}, sizeof({0}));\n", g));
@@ -471,6 +482,17 @@ impl<'a> Gen<'a> {
                 },
             },
             TypeExpr::List(inner) => Ok(Ty::list_of(self.resolve_type(inner, span)?)),
+            TypeExpr::Fn(ps, ret) => {
+                let mut v = Vec::new();
+                for p in ps {
+                    v.push(self.resolve_type(p, span)?);
+                }
+                let r = match ret {
+                    Some(r) => self.resolve_type(r, span)?,
+                    None => Ty::Void,
+                };
+                Ok(Ty::func_of(v, r))
+            }
             TypeExpr::Task(t) => Ok(Ty::task_of(self.resolve_type(t, span)?)),
             TypeExpr::Dict(k, v) => {
                 let kt = self.resolve_type(k, span)?;
@@ -513,9 +535,6 @@ impl<'a> Gen<'a> {
         }
         if let Some(v) = self.globals.get(name) {
             return Ok(v.clone());
-        }
-        if self.fns.contains_key(name) {
-            return nyi("using functions as values", span);
         }
         if name == "self" {
             return err("'self' can only be used inside a class method", span);
@@ -690,10 +709,25 @@ impl<'a> Gen<'a> {
             return self.method_call(obj, method, args, span);
         }
         let ExprKind::Ident(name) = &callee.kind else {
-            return nyi("calling values that are not plain function names", span);
+            // e.g. pick(true)(6) or table["add"](3, 4)
+            let f = self.val(callee)?;
+            let Ty::Func(ps, r) = f.ty else {
+                return err(format!("a value of type {} cannot be called", f.ty.name()), span);
+            };
+            return self.call_value(f, ps, *r, args, span);
         };
         if BUILTINS.contains(&name.as_str()) {
             return self.builtin(name, args, span);
+        }
+        if name.starts_with("__") {
+            return self.intrinsic_call(name, args, span);
+        }
+        if self.var_exists(name) {
+            let v = self.lookup(name, span)?;
+            let Ty::Func(ps, r) = v.ty else {
+                return err(format!("'{}' is a {}, not a function", name, v.ty.name()), span);
+            };
+            return self.call_value(E::new(v.cname, v.ty, !v.shared), ps, *r, args, span);
         }
         if let Some(&c) = self.class_ix.get(name) {
             return self.construct(c, args, span);
@@ -955,6 +989,9 @@ impl<'a> Gen<'a> {
             ExprKind::Bool(b) => Ok(E::new(if *b { "true" } else { "false" }, Ty::Bool, true)),
             ExprKind::Null => Ok(E::new("0", Ty::Null, true)),
             ExprKind::Ident(name) => {
+                if self.fns.contains_key(name.as_str()) && !self.var_exists(name) {
+                    return self.func_value(name, None, e.span);
+                }
                 let v = self.lookup(name, e.span)?;
                 Ok(E::new(v.cname, v.ty, !v.shared))
             }

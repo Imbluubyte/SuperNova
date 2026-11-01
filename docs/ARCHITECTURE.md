@@ -183,3 +183,17 @@ tests/         End-to-end tests (.sn + expected output)
 benchmarks/    Benchmarks and comparison scripts
 docs/          Documentation
 ```
+
+## 5. Function values and the standard library
+
+* A function value is a C function pointer to one monomorphised instance. Since
+  unannotated parameters are generic, a function name needs a type context (or fully
+  annotated parameters) to pick the instance; the compiler reports this clearly.
+  No closures exist, so a value is just a pointer (no environment allocation).
+* The standard library is SuperNova source embedded in the compiler (`stdlib/*.sn`,
+  `use std.math`) so `snc` stays a single binary on Termux. Modules call a small table of
+  C intrinsics (`__sqrt`, `__readText`, ...) defined in `compiler/src/codegen/stdlib.rs`
+  and `runtime/snrt.h`. Strings get native methods instead of a module because they are
+  used everywhere. Generic helpers (`random.choice`, `math.abs`) rely on monomorphisation.
+* Indentation: a file indents with tabs or with spaces (one level per tab, or per
+  consistent run of spaces), never both; the repository's own sources use tabs.

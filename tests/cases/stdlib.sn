@@ -1,0 +1,70 @@
+use std.math
+use std.random
+use std.time
+use std.sys
+use std.fs
+
+# strings
+var s = "  Hello, World  "
+var t = s.trim()
+print(t.length(), t.upper(), t.lower())
+print(t.contains("World"), t.startsWith("Hello"), t.endsWith("x"))
+print(t.find("o"), t.find("o", 6), t.find("zzz"))
+print(t.replace("l", "L"), t.slice(1, 5), "ab".repeat(3))
+print(t[1], t[t.length()])
+print("a,b,,c".split(","), "abc".chars())
+print(["x", "y", "z"].join("-"), [1, 2, 3].join(", "), [1.5, 2.5].join("|"))
+print("one two  three".split(" ").length())
+
+# math
+print(math.sqrt(16.0), math.sqrt(2), math.pow(2.0, 10.0))
+print(math.floor(2.7), math.ceil(2.1), math.round(2.5), math.round(-2.5), math.trunc(-2.7))
+print(math.abs(-4), math.abs(-4.5), math.min(3, 9), math.max(3.5, 1.5), math.clamp(15, 0, 10))
+print(math.sign(-3), math.sign(0), math.gcd(12, 18), math.hypot(3.0, 4.0))
+print(math.PI > 3.14, math.isNaN(math.sqrt(-1.0)))
+print(math.round(math.toDegrees(math.PI)), math.round(math.sin(math.PI / 2.0)))
+
+# random: deterministic once seeded
+random.seed(42)
+var a = random.randInt(1, 100)
+random.seed(42)
+print(a == random.randInt(1, 100))
+var deck = [1, 2, 3, 4, 5, 6, 7, 8]
+random.shuffle(deck)
+print(deck.length(), deck.sum())
+var ok = true
+for i in 1..200:
+	var r = random.random()
+	var d = random.randInt(3, 5)
+	if r < 0.0 or r >= 1.0 or d < 3 or d > 5:
+		ok = false
+print(ok, random.choice(["only"]))
+
+# time
+var t0 = time.monotonic()
+await sleep(0.02)
+print(time.since(t0) >= 0.015, time.now() > 1.0e9)
+
+# sys and fs
+print(sys.args().length(), sys.hasEnv("SN_SURELY_NOT_SET_12345"), sys.getEnv("SN_SURELY_NOT_SET_12345").length())
+var path = "stdlib_test_file.tmp"
+fs.writeText(path, "first\nsecond\n")
+fs.appendText(path, "third")
+print(fs.exists(path), fs.readLines(path), fs.readText(path).length())
+try:
+	print(fs.readText("no/such/file.txt"))
+catch e:
+	print("caught:", e)
+try:
+	print("abc".slice(2, 9))
+catch e:
+	print("caught:", e)
+try:
+	print("abc"[0])
+catch e:
+	print("caught:", e)
+try:
+	var none: List[Int] = []
+	print(random.choice(none))
+catch e:
+	print("caught:", e)

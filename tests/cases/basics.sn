@@ -17,41 +17,41 @@ print(1 + 2.5, 10 - 4, 3 * 3)
 print("a" + "b", "abc" < "abd", "x" == "x")
 
 if health > 200:
-    print("Healthy")
+	print("Healthy")
 orif health > 50:
-    print("Injured")
+	print("Injured")
 else:
-    print("Dead")
+	print("Dead")
 
 var total = 0
 for i in 1..10:
-    total += i
+	total += i
 print(total)
 
 var count = 0
 for i in 1..<10:
-    if i % 2 == 0:
-        continue
-    count += 1
-    if i > 7:
-        break
+	if i % 2 == 0:
+		continue
+	count += 1
+	if i > 7:
+		break
 print(count)
 
 var n = 0
 while n < 3:
-    n += 1
+	n += 1
 print(f"n is {n}")
 
 fn calculateDamage(attack, defence):
-    return attack - defence
+	return attack - defence
 
 fn fib(n: Int) -> Int:
-    if n < 2:
-        return n
-    return fib(n - 1) + fib(n - 2)
+	if n < 2:
+		return n
+	return fib(n - 1) + fib(n - 2)
 
 fn greet(who: String, punct: String = "!") -> String:
-    return "Hi " + who + punct
+	return "Hi " + who + punct
 
 print(calculateDamage(10, 5), calculateDamage(10.5, 5))
 print(fib(20))
@@ -59,12 +59,12 @@ print(greet("Ana"), greet("Bo", punct="?"))
 
 var enemy_type = "Dragon"
 match enemy_type:
-    case "Goblin":
-        print("Goblin")
-    case "Dragon":
-        print("Dragon")
-    default:
-        print("Unknown enemy")
+	case "Goblin":
+		print("Goblin")
+	case "Dragon":
+		print("Dragon")
+	default:
+		print("Unknown enemy")
 
 print(str(42) + "!", int("12") + 1, float(3), int(3.9))
 print(not false and (1 < 2 or 1 > 2), null == null)

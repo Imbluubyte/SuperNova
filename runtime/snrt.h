@@ -444,4 +444,197 @@ static inline void N##_merge(N *d, N *o) { \
     int64_t n = o->used; \
     for (int64_t i = 0; i < n && i < o->used; i++) if (o->ent[i].live) N##_put(d, o->ent[i].k, o->ent[i].v); }
 
+/* ---------- standard library support: strings, math, random, time, system, files ---------- */
+
+#include <ctype.h>
+#include <time.h>
+#include <unistd.h>
+
+/* Strings are byte strings: length and indexes count bytes (UTF-8 code units);
+ * upper/lower change ASCII letters only. Indexes are 1-based. */
+
+SN_COLD static void sn_str_oob(const char *loc, int64_t i, int64_t len) {
+    sn_panic(loc, "string index %" PRId64 " is out of range (length %" PRId64 "; indexes start at 1)", i, len);
+}
+
+/* `count` bytes starting at 1-based `start`, clamped to the string. */
+static inline SnStr *sn_str_sub(SnStr *s, int64_t start, int64_t count) {
+    if (start < 1) { count += start - 1; start = 1; }
+    if (count < 0 || start > s->len) count = 0;
+    if (start + count - 1 > s->len) count = s->len - start + 1;
+    if (count <= 0) return sn_str_new("", 0);
+    return sn_str_new(s->data + start - 1, count);
+}
+
+static inline SnStr *sn_str_at(SnStr *s, int64_t i, const char *loc) {
+    if (i < 1 || i > s->len) sn_str_oob(loc, i, s->len);
+    return sn_str_new(s->data + i - 1, 1);
+}
+
+/* chars `from..to` inclusive, like a range */
+static inline SnStr *sn_str_slice(SnStr *s, int64_t from, int64_t to, const char *loc) {
+    if (from < 1 || to > s->len || from > to + 1)
+        sn_panic(loc, "slice %" PRId64 "..%" PRId64 " is out of range (string length %" PRId64 "; indexes start at 1)", from, to, s->len);
+    return sn_str_sub(s, from, to - from + 1);
+}
+
+/* 1-based index of the first occurrence of `sub` at or after `from`, or 0. */
+static inline int64_t sn_str_find(SnStr *s, SnStr *sub, int64_t from) {
+    if (from < 1) from = 1;
+    if (sub->len == 0) return from <= s->len + 1 ? from : 0;
+    if (from > s->len) return 0;
+    const char *p = s->data + from - 1;
+    int64_t left = s->len - (from - 1);
+    while (left >= sub->len) {
+        const char *q = (const char *)memchr(p, sub->data[0], (size_t)(left - sub->len + 1));
+        if (!q) return 0;
+        if (memcmp(q, sub->data, (size_t)sub->len) == 0) return (int64_t)(q - s->data) + 1;
+        left -= (int64_t)(q - p) + 1;
+        p = q + 1;
+    }
+    return 0;
+}
+
+static inline bool sn_str_starts(SnStr *s, SnStr *p) { return p->len <= s->len && memcmp(s->data, p->data, (size_t)p->len) == 0; }
+static inline bool sn_str_ends(SnStr *s, SnStr *p) { return p->len <= s->len && memcmp(s->data + s->len - p->len, p->data, (size_t)p->len) == 0; }
+
+static inline SnStr *sn_str_upper(SnStr *s) {
+    SnStr *r = sn_str_new(s->data, s->len);
+    for (int64_t i = 0; i < r->len; i++) if (r->data[i] >= 'a' && r->data[i] <= 'z') r->data[i] -= 32;
+    return r;
+}
+static inline SnStr *sn_str_lower(SnStr *s) {
+    SnStr *r = sn_str_new(s->data, s->len);
+    for (int64_t i = 0; i < r->len; i++) if (r->data[i] >= 'A' && r->data[i] <= 'Z') r->data[i] += 32;
+    return r;
+}
+static inline SnStr *sn_str_trim(SnStr *s) {
+    int64_t a = 0, b = s->len;
+    while (a < b && isspace((unsigned char)s->data[a])) a++;
+    while (b > a && isspace((unsigned char)s->data[b - 1])) b--;
+    return sn_str_new(s->data + a, b - a);
+}
+
+static inline SnStr *sn_str_replace(SnStr *s, SnStr *from, SnStr *to, const char *loc) {
+    if (from->len == 0) sn_panic(loc, "replace() needs a non-empty text to look for");
+    SnBuf b;
+    sn_buf_init(&b);
+    int64_t pos = 1;
+    for (;;) {
+        int64_t i = sn_str_find(s, from, pos);
+        if (!i) break;
+        sn_buf_text(&b, s->data + pos - 1, i - pos);
+        sn_buf_text(&b, to->data, to->len);
+        pos = i + from->len;
+    }
+    sn_buf_text(&b, s->data + pos - 1, s->len - (pos - 1));
+    SnStr *r = sn_str_new(b.p, b.len);
+    free(b.p);
+    return r;
+}
+
+static inline SnStr *sn_str_repeat(SnStr *s, int64_t n, const char *loc) {
+    if (n < 0) sn_panic(loc, "repeat() count cannot be negative");
+    if (s->len && n > ((int64_t)1 << 40) / s->len) sn_panic(loc, "repeat() result is too large");
+    SnStr *r = (SnStr *)sn_gc_alloc(sizeof(SnStr) + (size_t)(s->len * n) + 1, 1);
+    r->len = s->len * n;
+    for (int64_t i = 0; i < n; i++) memcpy(r->data + i * s->len, s->data, (size_t)s->len);
+    r->data[r->len] = 0;
+    return r;
+}
+
+/* math */
+static inline int64_t sn_floor_i(double x, const char *loc) { return sn_f2i(floor(x), loc); }
+static inline int64_t sn_ceil_i(double x, const char *loc) { return sn_f2i(ceil(x), loc); }
+static inline int64_t sn_round_i(double x, const char *loc) { return sn_f2i(round(x), loc); }
+static inline int64_t sn_trunc_i(double x, const char *loc) { return sn_f2i(trunc(x), loc); }
+
+/* random numbers: splitmix64, seeded from the clock unless seed() is called */
+static uint64_t sn_rng_state;
+static int sn_rng_seeded;
+static inline uint64_t sn_rng_next(void) {
+    if (!sn_rng_seeded) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        sn_rng_state = (uint64_t)ts.tv_nsec * 6364136223846793005ULL ^ (uint64_t)ts.tv_sec ^ ((uint64_t)getpid() << 32);
+        sn_rng_seeded = 1;
+    }
+    uint64_t z = (sn_rng_state += 0x9e3779b97f4a7c15ULL);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+static inline double sn_random(void) { return (double)(sn_rng_next() >> 11) * (1.0 / 9007199254740992.0); }
+static inline void sn_seed(int64_t s) { sn_rng_state = (uint64_t)s; sn_rng_seeded = 1; }
+static inline int64_t sn_rand_int(int64_t lo, int64_t hi, const char *loc) {
+    if (hi < lo) sn_panic(loc, "randInt(%" PRId64 ", %" PRId64 "): the upper bound is below the lower bound", lo, hi);
+    uint64_t span = (uint64_t)hi - (uint64_t)lo + 1;
+    if (span == 0) return (int64_t)sn_rng_next();
+    return (int64_t)((uint64_t)lo + sn_rng_next() % span);
+}
+
+/* time */
+static inline double sn_wall_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+static inline double sn_mono_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* system */
+static int sn_argc;
+static char **sn_argv;
+static inline int64_t sn_arg_count(void) { return sn_argc > 0 ? sn_argc - 1 : 0; }
+static inline SnStr *sn_arg(int64_t i, const char *loc) {
+    if (i < 1 || i > sn_arg_count()) sn_panic(loc, "argument %" PRId64 " does not exist (%" PRId64 " given)", i, sn_arg_count());
+    return sn_str_new(sn_argv[i], (int64_t)strlen(sn_argv[i]));
+}
+static inline void sn_write(SnStr *s) { fwrite(s->data, 1, (size_t)s->len, stdout); fflush(stdout); }
+SN_COLD static void sn_exit(int64_t code) { fflush(stdout); fflush(stderr); exit((int)code); }
+static inline SnStr *sn_getenv(SnStr *n) { const char *v = getenv(n->data); return sn_str_new(v ? v : "", v ? (int64_t)strlen(v) : 0); }
+static inline bool sn_hasenv(SnStr *n) { return getenv(n->data) != NULL; }
+static inline SnStr *sn_read_line(const char *loc) {
+    char *line = NULL;
+    size_t cap = 0;
+    fflush(stdout);
+    ssize_t n = getline(&line, &cap, stdin);
+    if (n < 0) { free(line); sn_panic(loc, "end of input"); }
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) n--;
+    SnStr *r = sn_str_new(line, (int64_t)n);
+    free(line);
+    return r;
+}
+
+/* files (synchronous; see readFile/writeFile for the async versions) */
+static inline SnStr *sn_read_text(SnStr *path, const char *loc) {
+    FILE *f = fopen(path->data, "rb");
+    if (!f) sn_panic(loc, "cannot read '%s': %s", path->data, strerror(errno));
+    size_t cap = 4096, n = 0;
+    char *buf = (char *)sn_xmalloc(cap);
+    for (;;) {
+        if (n == cap) { cap *= 2; buf = (char *)realloc(buf, cap); if (!buf) sn_fatal("<runtime>", "out of memory"); }
+        size_t r = fread(buf + n, 1, cap - n, f);
+        n += r;
+        if (r == 0) break;
+    }
+    int bad = ferror(f);
+    fclose(f);
+    if (bad) { free(buf); sn_panic(loc, "cannot read '%s'", path->data); }
+    SnStr *s = sn_str_new(buf, (int64_t)n);
+    free(buf);
+    return s;
+}
+static inline void sn_write_text(SnStr *path, SnStr *text, bool append, const char *loc) {
+    FILE *f = fopen(path->data, append ? "ab" : "wb");
+    if (!f) sn_panic(loc, "cannot write '%s': %s", path->data, strerror(errno));
+    size_t w = text->len ? fwrite(text->data, 1, (size_t)text->len, f) : 0;
+    int bad = fclose(f) != 0 || w != (size_t)text->len;
+    if (bad) sn_panic(loc, "cannot write '%s'", path->data);
+}
+static inline bool sn_file_exists(SnStr *path) { return access(path->data, F_OK) == 0; }
+
 #endif /* SNRT_H */

@@ -1,4 +1,4 @@
 class A:
-    fn onCreation(v):
-        pass
+	fn onCreation(v):
+		pass
 var a = A()

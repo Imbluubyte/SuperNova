@@ -1,5 +1,5 @@
 class A:
-    pass
+	pass
 class B:
-    pass
+	pass
 var xs = [A(), B()]

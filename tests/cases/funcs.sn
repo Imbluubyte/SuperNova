@@ -1,0 +1,88 @@
+fn double(x: Int) -> Int:
+	return x * 2
+
+fn square(x: Int) -> Int:
+	return x * x
+
+fn isEven(x: Int) -> Bool:
+	return x % 2 == 0
+
+fn add(a: Int, b: Int) -> Int:
+	return a + b
+
+fn greet(name: String) -> String:
+	return f"hello {name}"
+
+fn shout(s: String):
+	print(s.upper())
+
+fn apply(f: Fn(Int) -> Int, x: Int) -> Int:
+	return f(x)
+
+fn twice(f: Fn(Int) -> Int, x: Int) -> Int:
+	return f(f(x))
+
+fn pick(useSquare: Bool) -> Fn(Int) -> Int:
+	if useSquare:
+		return square
+	return double
+
+fn compose(f: Fn(Int) -> Int, g: Fn(Int) -> Int, x: Int) -> Int:
+	return g(f(x))
+
+# unannotated parameters are generic over the function type too
+fn applyAny(f, x):
+	return f(x)
+
+var f: Fn(Int) -> Int = double
+print(f(21), apply(square, 7), twice(double, 5))
+f = square
+print(f(9))
+print(pick(true)(6), pick(false)(6))
+print(compose(double, square, 3))
+print(applyAny(greet, "sn"))
+shout("quiet")
+
+# lists of functions
+var ops: List[Fn(Int) -> Int] = [double, square, double]
+var results: List[Int] = []
+for op in ops:
+	results.add(op(5))
+print(results)
+
+# a dictionary of functions
+var table: Dict[String, Fn(Int, Int) -> Int] = {"add": add}
+print(table["add"](3, 4))
+
+# list methods that take functions
+var nums = [1, 2, 3, 4, 5, 6]
+print(nums.map(square))
+print(nums.map(isEven))
+nums.each(shout2)
+print(nums.reduce(0, add))
+print(nums.any(isEven), nums.all(isEven))
+print(nums.filter(isEven))
+var pred: Fn(Int) -> Bool = isEven
+print(nums.filter(pred))
+print(["a", "b", "c"].map(greet))
+print(f)
+
+fn shout2(x: Int):
+	print("item", x)
+
+# callbacks stored in objects
+class Button:
+	var handler: Fn(String) -> String = greet
+	var clicks = 0
+	fn click(name: String) -> String:
+		clicks += 1
+		return handler(name)
+var b = Button()
+print(b.click("ada"), b.clicks)
+
+# async function values
+async fn slowDouble(x: Int) -> Int:
+	await sleep(0.001)
+	return x * 2
+var af: Fn(Int) -> Task[Int] = slowDouble
+print(await af(8))

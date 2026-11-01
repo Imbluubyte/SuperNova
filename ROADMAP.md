@@ -11,7 +11,7 @@
 - [x] 8a. Garbage collector, stack-overflow and out-of-memory handling (docs/MEMORY.md)
 - [x] 8b. Errors (try/catch/finally)
 - [x] 9. async/await (stackful coroutines, timers, background file I/O)
-- [ ] 10. Standard library
+- [x] 10. Standard library (strings, std.math, std.random, std.time, std.sys, std.fs) and first-class functions
 - [ ] 11. Termux build and on-device testing
 - [ ] 12. Optimisation passes and benchmarks
 - [ ] 13. Nebula integration interface

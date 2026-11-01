@@ -1,7 +1,7 @@
 class A:
-    private var secret = 1
+	private var secret = 1
 class B extends A:
-    fn peek():
-        return secret
+	fn peek():
+		return secret
 var b = B()
 print(b.peek())

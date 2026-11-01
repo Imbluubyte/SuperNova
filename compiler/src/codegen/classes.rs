@@ -540,6 +540,13 @@ impl<'a> Gen<'a> {
         self.ensure_layout(class)?;
         let cls_name = self.classes[class].name.clone();
         let Some((owner0, decl0)) = self.find_method(class, name) else {
+            if let Some(f) = self.classes[class].fields.iter().find(|f| f.name == name).cloned() {
+                if let Ty::Func(ps, r) = f.ty {
+                    self.check_access(f.owner, f.is_private, "field", name, span)?;
+                    let fe = E::new(format!("(({})->f_{})", recv.c, name), f.ty, false);
+                    return self.call_value(fe, ps, *r, args, span);
+                }
+            }
             let hint = if self.classes[class].fields.iter().any(|f| f.name == name) {
                 format!(" ('{}' is a field, not a method)", name)
             } else {

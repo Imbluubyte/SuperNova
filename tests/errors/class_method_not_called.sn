@@ -1,5 +1,5 @@
 class A:
-    fn f():
-        pass
+	fn f():
+		pass
 var a = A()
 print(a.f)

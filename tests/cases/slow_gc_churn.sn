@@ -1,9 +1,9 @@
 # About a gigabyte of garbage in total; the heap must stay small.
 var total = 0
 for round in 1..400:
-    var big: List[Int] = []
-    for i in 1..100000:
-        big.add(i)
-    var half = big * 2
-    total += big.length() + half.length()
+	var big: List[Int] = []
+	for i in 1..100000:
+		big.add(i)
+	var half = big * 2
+	total += big.length() + half.length()
 print(total)

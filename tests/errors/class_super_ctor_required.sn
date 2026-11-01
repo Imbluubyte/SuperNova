@@ -1,7 +1,7 @@
 class A:
-    fn onCreation(v):
-        pass
+	fn onCreation(v):
+		pass
 class B extends A:
-    fn onCreation():
-        pass
+	fn onCreation():
+		pass
 var b = B()

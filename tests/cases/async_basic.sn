@@ -1,25 +1,25 @@
 async fn square(x: Int) -> Int:
-    await sleep(0.01)
-    return x * x
+	await sleep(0.01)
+	return x * x
 
 async fn greet(name: String, delay: Float) -> String:
-    await sleep(delay)
-    print("hello from", name)
-    return f"hi {name}"
+	await sleep(delay)
+	print("hello from", name)
+	return f"hi {name}"
 
 async fn failing(n: Int) -> Int:
-    await sleep(0.001)
-    if n > 2:
-        throw f"too big: {n}"
-    return n
+	await sleep(0.001)
+	if n > 2:
+		throw f"too big: {n}"
+	return n
 
 async fn chain(n: Int) -> Int:
-    var a = await square(n)
-    var b = await square(a)
-    return a + b
+	var a = await square(n)
+	var b = await square(a)
+	return a + b
 
 fn syncDouble(x: Int) -> Int:
-    return x * 2
+	return x * 2
 
 print("start")
 
@@ -32,10 +32,10 @@ print(await slow)
 # many tasks at once
 var tasks: List[Task[Int]] = []
 for i in 1..50:
-    tasks.add(square(i))
+	tasks.add(square(i))
 var total = 0
 for t in tasks:
-    total += await t
+	total += await t
 print("sum of squares", total)
 
 print(await chain(3))
@@ -43,33 +43,33 @@ print(syncDouble(await square(4)))
 
 # errors travel through await
 try:
-    var t = failing(5)
-    print(await t)
+	var t = failing(5)
+	print(await t)
 catch e:
-    print("caught:", e)
+	print("caught:", e)
 
 # an error inside a task is caught by the task's awaiter, not by unrelated code
 async fn safe(n: Int) -> String:
-    try:
-        return f"ok {await failing(n)}"
-    catch e:
-        return f"recovered from {e}"
+	try:
+		return f"ok {await failing(n)}"
+	catch e:
+		return f"recovered from {e}"
 print(await safe(1))
 print(await safe(9))
 
 # a task that is never awaited still runs to completion before exit
 async fn background():
-    await sleep(0.02)
-    print("background finished")
+	await sleep(0.02)
+	print("background finished")
 var ignored = background()
 
 # async methods
 class Counter:
-    var n = 0
-    async fn incrementLater(by: Int) -> Int:
-        await sleep(0.005)
-        n += by
-        return n
+	var n = 0
+	async fn incrementLater(by: Int) -> Int:
+		await sleep(0.005)
+		n += by
+		return n
 var c = Counter()
 var r1 = c.incrementLater(5)
 var r2 = c.incrementLater(7)

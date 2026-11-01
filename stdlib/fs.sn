@@ -1,0 +1,30 @@
+# std.fs: reading and writing files, one call at a time.
+# (For non-blocking versions use the built-in `await readFile(path)` / `await writeFile(path, text)`.)
+#   use std.fs
+#   fs.writeText("a.txt", "hello")
+#   print(fs.readText("a.txt"))
+
+fn readText(path: String) -> String:
+	return __readText(path)
+
+fn writeText(path: String, text: String):
+	__writeText(path, text)
+
+fn appendText(path: String, text: String):
+	__appendText(path, text)
+
+fn exists(path: String) -> Bool:
+	return __fileExists(path)
+
+# the lines of a file, without line endings
+fn readLines(path: String) -> List[String]:
+	var text = __readText(path)
+	var out: List[String] = []
+	for line in text.split("\n"):
+		if line.endsWith("\r"):
+			out.add(line.slice(1, line.length() - 1))
+		else:
+			out.add(line)
+	if out.length() > 0 and out[out.length()].length() == 0:
+		out.remove(out[out.length()])
+	return out

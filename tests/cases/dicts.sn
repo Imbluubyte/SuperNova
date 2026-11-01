@@ -10,7 +10,7 @@ print(ages, ages.keys(), ages.values())
 
 var total = 0
 for name in ages:
-    total += ages[name]
+	total += ages[name]
 print("total", total)
 
 # insertion order survives removal and re-insertion
@@ -20,17 +20,17 @@ print(ages)
 # annotated empty dict, Int keys, nested values
 var squares: Dict[Int, Int] = {}
 for i in 1..10:
-    squares[i * i] = i
+	squares[i * i] = i
 print(squares.length(), squares[49], squares.keys())
 
 var groups: Dict[String, List[Int]] = {}
 groups["even"] = []
 groups["odd"] = []
 for i in 1..6:
-    if i % 2 == 0:
-        groups["even"].add(i)
-    else:
-        groups["odd"].add(i)
+	if i % 2 == 0:
+		groups["even"].add(i)
+	else:
+		groups["odd"].add(i)
 var odd = groups["odd"]
 print(groups, f"odd={odd}")
 
@@ -48,23 +48,23 @@ print(a, a.length())
 # growth, deletion and tombstones
 var big: Dict[Int, Int] = {}
 for i in 1..5000:
-    big[i] = i * 2
+	big[i] = i * 2
 for i in 1..5000:
-    if i % 3 != 0:
-        big.remove(i)
+	if i % 3 != 0:
+		big.remove(i)
 var s = 0
 for k in big:
-    s += big[k]
+	s += big[k]
 print(big.length(), s)
 for i in 1..2000:
-    big[i] = 0
+	big[i] = 0
 print(big.length(), big.contains(3), big.contains(4999))
 
 # class values and shared references
 class Item:
-    var name = "?"
-    fn onCreation(name: String):
-        self.name = name
+	var name = "?"
+	fn onCreation(name: String):
+		self.name = name
 var shop = {"a": Item("apple"), "b": Item("bread")}
 shop["a"].name = "pear"
 print(shop["a"].name, shop["b"].name)
@@ -75,5 +75,5 @@ print(shop.length())
 # strings as keys built at runtime
 var counts: Dict[String, Int] = {}
 for w in ["a", "b", "a", "c", "a", "b"]:
-    counts[w] = counts.get(w, 0) + 1
+	counts[w] = counts.get(w, 0) + 1
 print(counts)

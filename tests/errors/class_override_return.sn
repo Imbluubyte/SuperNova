@@ -1,8 +1,8 @@
 class A:
-    fn f():
-        return 1
+	fn f():
+		return 1
 class B extends A:
-    fn f():
-        return "x"
+	fn f():
+		return "x"
 var a: A = B()
 print(a.f())

@@ -1,8 +1,8 @@
 var xs: List[Int] = []
 for i in 1..5000000:
-    xs.add(i % 1000)
+	xs.add(i % 1000)
 var total = 0
 for round in 1..20:
-    var ys = xs * 2 + 1
-    total += ys.sum()
+	var ys = xs * 2 + 1
+	total += ys.sum()
 print(total, xs.filter(> 500).length())

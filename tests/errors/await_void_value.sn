@@ -1,4 +1,4 @@
 async fn g():
-    pass
+	pass
 var x = await g()
 print(x)

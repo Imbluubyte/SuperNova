@@ -1,4 +1,4 @@
 class A:
-    var x = 1
+	var x = 1
 var a = A()
 a.x = "hi"

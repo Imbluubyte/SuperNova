@@ -17,9 +17,9 @@ functions are planned but not implemented yet. Memory is managed by a built-in g
 ```
 var name = "Player"
 fn fib(n: Int) -> Int:
-    if n < 2:
-        return n
-    return fib(n - 1) + fib(n - 2)
+	if n < 2:
+		return n
+	return fib(n - 1) + fib(n - 2)
 print(f"Hello {name}! fib(20) = {fib(20)}")
 ```
 

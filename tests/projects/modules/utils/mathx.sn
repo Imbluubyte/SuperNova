@@ -5,17 +5,17 @@ var calls = 0
 private var secret = 42
 
 fn square(x):
-    calls += 1
-    return x * x
+	calls += 1
+	return x * x
 
 fn area(r: Float) -> Float:
-    return PI * square(r)
+	return PI * square(r)
 
 private fn hidden() -> Int:
-    return secret
+	return secret
 
 fn reveal() -> Int:
-    return hidden() + 1
+	return hidden() + 1
 
 fn callCount() -> Int:
-    return calls
+	return calls

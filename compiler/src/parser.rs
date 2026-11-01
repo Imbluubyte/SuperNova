@@ -279,6 +279,17 @@ impl Parser {
             let inner = self.type_expr()?;
             self.expect(&Tok::RBracket, "']'")?;
             TypeExpr::List(Box::new(inner))
+        } else if name == "Fn" && self.eat(&Tok::LParen) {
+            let mut ps = Vec::new();
+            while !self.at(&Tok::RParen) {
+                ps.push(self.type_expr()?);
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            self.expect(&Tok::RParen, "')'")?;
+            let ret = if self.eat(&Tok::Arrow) { Some(Box::new(self.type_expr()?)) } else { None };
+            TypeExpr::Fn(ps, ret)
         } else if name == "Task" && self.eat(&Tok::LBracket) {
             let inner = self.type_expr()?;
             self.expect(&Tok::RBracket, "']'")?;

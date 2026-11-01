@@ -19,10 +19,10 @@ var mixed = [1, 2, 3, 4, 5, "Hi", "Hello"]
 print(mixed.filter(str), mixed.filter(int))
 
 fn isEven(number):
-    return number % 2 == 0
+	return number % 2 == 0
 
 fn greaterThan(number, minimum):
-    return number > minimum
+	return number > minimum
 
 var big = [1, 5, 10, 15, 20]
 print(nums.filter(isEven), big.filter(greaterThan, 9), big.filter(greaterThan, minimum=14))
@@ -46,11 +46,11 @@ var names = ["Zed", "Amy", "Bob"]
 names.sort()
 print(names, names.length())
 for n in names:
-    print(f"hi {n}")
+	print(f"hi {n}")
 
 var total = 0
 for v in [1, 2, 3]:
-    total += v
+	total += v
 print(total)
 
 var alias = a
@@ -60,7 +60,7 @@ a.add(100)
 print(a, alias, snapshot)
 
 fn getPosition():
-    return 10, 20
+	return 10, 20
 
 var position = getPosition()
 var x = position[1]
@@ -76,7 +76,7 @@ print(grid, grid[1][2])
 print(items.filter(null))
 
 fn firstOf(xs: List[Int]) -> Int:
-    return xs[1]
+	return xs[1]
 print(firstOf([7, 8]))
 var floats: List[Float] = [1, 2, 3]
 print(floats, floats / 2)

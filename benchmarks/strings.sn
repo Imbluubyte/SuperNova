@@ -1,6 +1,6 @@
 var total = 0
 for i in 1..2000000:
-    var s = f"item {i} of {i * 2}"
-    var t = s + "!"
-    total += int(str(i)) % 3
+	var s = f"item {i} of {i * 2}"
+	var t = s + "!"
+	total += int(str(i)) % 3
 print(total)

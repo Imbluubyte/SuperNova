@@ -2,9 +2,9 @@ var name = "Player"
 print(f"Hello {name}!")
 
 fn fib(n: Int) -> Int:
-    if n < 2:
-        return n
-    return fib(n - 1) + fib(n - 2)
+	if n < 2:
+		return n
+	return fib(n - 1) + fib(n - 2)
 
 print(f"fib(20) = {fib(20)}")
 

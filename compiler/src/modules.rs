@@ -53,6 +53,17 @@ pub fn bare_name(name: &str) -> String {
     shown.rsplit('.').next().unwrap_or(&shown).to_string()
 }
 
+/// The standard library, embedded in the compiler: `use std.math` and friends.
+const STD: [(&str, &str); 5] = [
+    ("math", include_str!("../../stdlib/math.sn")),
+    ("random", include_str!("../../stdlib/random.sn")),
+    ("time", include_str!("../../stdlib/time.sn")),
+    ("sys", include_str!("../../stdlib/sys.sn")),
+    ("fs", include_str!("../../stdlib/fs.sn")),
+];
+
+const STD_PREFIX: &str = "<std>";
+
 struct Export {
     private: bool,
 }
@@ -133,6 +144,9 @@ impl Loader {
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.to_string_lossy().to_string());
         }
+        if let Ok(rel) = path.strip_prefix(STD_PREFIX) {
+            return format!("std/{}", rel.to_string_lossy());
+        }
         match path.strip_prefix(&self.root) {
             Ok(rel) => rel.to_string_lossy().to_string(),
             Err(_) => path.to_string_lossy().to_string(),
@@ -161,12 +175,18 @@ impl Loader {
             }
             return Ok(i);
         }
-        let src = std::fs::read_to_string(path).map_err(|e| {
-            CompileError::new(
-                format!("cannot read {}: {}", path.display(), e),
-                from.unwrap_or_else(fake_span),
-            )
-        })?;
+        let src = match path.strip_prefix(STD_PREFIX) {
+            Ok(rel) => {
+                let stem = rel.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                STD.iter().find(|(n, _)| *n == stem).map(|(_, s)| s.to_string()).unwrap_or_default()
+            }
+            Err(_) => std::fs::read_to_string(path).map_err(|e| {
+                CompileError::new(
+                    format!("cannot read {}: {}", path.display(), e),
+                    from.unwrap_or_else(fake_span),
+                )
+            })?,
+        };
         let idx = self.files.len();
         let display = self.display_for(path, idx);
         self.files.push(SrcFile { display, src: src.clone() });
@@ -203,6 +223,16 @@ impl Loader {
     }
 
     fn resolve(&self, path: &[String], span: Span) -> R<PathBuf> {
+        if path[0] == "std" {
+            if path.len() == 2 && STD.iter().any(|(n, _)| *n == path[1]) {
+                return Ok(PathBuf::from(STD_PREFIX).join(format!("{}.sn", path[1])));
+            }
+            let names: Vec<&str> = STD.iter().map(|(n, _)| *n).collect();
+            return Err(CompileError::new(
+                format!("there is no standard library module '{}' (available: {})", path.join("."), names.join(", ")),
+                span,
+            ));
+        }
         let mut rel = PathBuf::new();
         for (i, seg) in path.iter().enumerate() {
             if i + 1 == path.len() {
@@ -383,6 +413,14 @@ impl<'a> Rn<'a> {
             TypeExpr::Tuple(items) => {
                 for i in items {
                     self.ty(i, span)?;
+                }
+            }
+            TypeExpr::Fn(ps, ret) => {
+                for i in ps {
+                    self.ty(i, span)?;
+                }
+                if let Some(r) = ret {
+                    self.ty(r, span)?;
                 }
             }
         }

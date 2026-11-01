@@ -1,0 +1,31 @@
+# std.sys: program arguments, environment, console input and exit.
+#   use std.sys
+#   var name = sys.input("name? ")
+
+# command-line arguments after the program name
+fn args() -> List[String]:
+	var out: List[String] = []
+	for i in 1..__argCount():
+		out.add(__arg(i))
+	return out
+
+fn exit(code: Int = 0):
+	__exit(code)
+
+fn getEnv(name: String) -> String:
+	return __env(name)
+
+fn hasEnv(name: String) -> Bool:
+	return __hasEnv(name)
+
+# prints text without a newline
+fn write(text: String):
+	__write(text)
+
+# reads one line from standard input (without the newline); throws at end of input
+fn readLine() -> String:
+	return __readLine()
+
+fn input(prompt: String = "") -> String:
+	__write(prompt)
+	return __readLine()

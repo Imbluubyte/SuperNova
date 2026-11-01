@@ -1,0 +1,3 @@
+fn big(x: Int) -> Bool:
+	return x > 1
+print([1, 2].map(big).sum())

@@ -1,0 +1,16 @@
+# std.time: clocks. (To wait, use the built-in `await sleep(seconds)`.)
+#   use std.time
+#   var start = time.monotonic()
+#   ...
+#   print(time.since(start), "seconds")
+
+# seconds since 1970-01-01 (wall clock)
+fn now() -> Float:
+	return __now()
+
+# seconds from an arbitrary starting point; never goes backwards (use it to time things)
+fn monotonic() -> Float:
+	return __monotonic()
+
+fn since(start: Float) -> Float:
+	return __monotonic() - start

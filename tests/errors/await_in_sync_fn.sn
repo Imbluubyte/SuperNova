@@ -1,5 +1,5 @@
 fn f() -> Int:
-    return await g()
+	return await g()
 
 async fn g() -> Int:
-    return 1
+	return 1

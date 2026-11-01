@@ -1,4 +1,4 @@
 class A:
-    const id = 1
+	const id = 1
 var a = A()
 a.id = 2

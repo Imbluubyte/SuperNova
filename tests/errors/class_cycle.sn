@@ -1,4 +1,4 @@
 class A extends B:
-    pass
+	pass
 class B extends A:
-    pass
+	pass

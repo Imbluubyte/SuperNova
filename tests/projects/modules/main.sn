@@ -15,15 +15,15 @@ print(d.describe(), d.name)
 print(sh.name)
 var shapes: List[sh.Shape] = [c, d, sh.Shape("blob")]
 for s in shapes:
-    print(s.describe())
+	print(s.describe())
 print(c)
 
 # a local named like an imported module shadows it
 fn shadow(mathx: Int) -> Int:
-    return mathx + 1
+	return mathx + 1
 print(shadow(1))
 
 class Mine extends sh.Circle:
-    fn area() -> Float:
-        return super.area() * 2.0
+	fn area() -> Float:
+		return super.area() * 2.0
 print(Mine(1.0).describe())

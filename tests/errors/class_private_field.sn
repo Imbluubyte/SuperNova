@@ -1,4 +1,4 @@
 class A:
-    private var secret = 1
+	private var secret = 1
 var a = A()
 print(a.secret)

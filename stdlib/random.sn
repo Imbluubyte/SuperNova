@@ -1,0 +1,37 @@
+# std.random: pseudo-random numbers (seeded from the clock unless you call seed).
+#   use std.random
+#   print(random.randInt(1, 6), random.choice(["a", "b"]))
+
+fn seed(n: Int):
+	__seed(n)
+
+# a Float in [0, 1)
+fn random() -> Float:
+	return __random()
+
+# an Int from low to high, both included
+fn randInt(low: Int, high: Int) -> Int:
+	return __randInt(low, high)
+
+fn randFloat(low: Float, high: Float) -> Float:
+	return low + __random() * (high - low)
+
+# true with probability p
+fn chance(p: Float) -> Bool:
+	return __random() < p
+
+# a random element of any list
+fn choice(xs):
+	if xs.length() == 0:
+		throw "choice() needs a non-empty list"
+	return xs[__randInt(1, xs.length())]
+
+# shuffles any list in place
+fn shuffle(xs):
+	var i = xs.length()
+	while i > 1:
+		var j = __randInt(1, i)
+		var tmp = xs[i]
+		xs[i] = xs[j]
+		xs[j] = tmp
+		i -= 1

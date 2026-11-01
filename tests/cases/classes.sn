@@ -1,23 +1,23 @@
 class Player:
-    var health = 100
-    var speed = 5.0
-    var name = "Hero"
-    var inventory: List[String] = []
+	var health = 100
+	var speed = 5.0
+	var name = "Hero"
+	var inventory: List[String] = []
 
-    fn onCreation():
-        print("Player created!")
+	fn onCreation():
+		print("Player created!")
 
-    fn takeDamage(amount):
-        health -= amount
+	fn takeDamage(amount):
+		health -= amount
 
-    fn isAlive():
-        return health > 0
+	fn isAlive():
+		return health > 0
 
-    fn pickUp(item: String):
-        inventory.add(item)
+	fn pickUp(item: String):
+		inventory.add(item)
 
-    fn describe() -> String:
-        return f"{name}: hp={health} items={inventory}"
+	fn describe() -> String:
+		return f"{name}: hp={health} items={inventory}"
 
 var p = Player()
 p.takeDamage(30)
@@ -32,21 +32,21 @@ print(p.isAlive(), p.health)
 
 # constructor arguments, defaults, named arguments, self
 class Vec2:
-    var x = 0.0
-    var y = 0.0
+	var x = 0.0
+	var y = 0.0
 
-    fn onCreation(px = 0.0, py = 0.0):
-        x = px
-        y = py
+	fn onCreation(px = 0.0, py = 0.0):
+		x = px
+		y = py
 
-    fn length2():
-        return self.x * self.x + self.y * self.y
+	fn length2():
+		return self.x * self.x + self.y * self.y
 
-    fn add(other: Vec2) -> Vec2:
-        return Vec2(x + other.x, y + other.y)
+	fn add(other: Vec2) -> Vec2:
+		return Vec2(x + other.x, y + other.y)
 
-    fn toString() -> String:
-        return f"({x}, {y})"
+	fn toString() -> String:
+		return f"({x}, {y})"
 
 var a = Vec2(3, 4)
 var b = Vec2(py=1.5)
@@ -55,48 +55,48 @@ print(f"vector: {a.add(a)}", str(b))
 
 # inheritance, overriding, virtual dispatch
 class Entity:
-    var hp = 10
-    var label = "entity"
+	var hp = 10
+	var label = "entity"
 
-    fn onCreation(start_hp = 10):
-        hp = start_hp
-        print(f"Entity({hp})")
+	fn onCreation(start_hp = 10):
+		hp = start_hp
+		print(f"Entity({hp})")
 
-    fn describe() -> String:
-        return f"{label} with {hp} hp"
+	fn describe() -> String:
+		return f"{label} with {hp} hp"
 
-    fn hit(amount: Int):
-        hp -= amount
+	fn hit(amount: Int):
+		hp -= amount
 
-    fn speak() -> String:
-        return "..."
+	fn speak() -> String:
+		return "..."
 
-    fn intro() -> String:
-        return describe() + " says " + speak()
+	fn intro() -> String:
+		return describe() + " says " + speak()
 
 class Goblin extends Entity:
-    var loot = 3
+	var loot = 3
 
-    fn onCreation():
-        label = "goblin"
-        print("Goblin ready")
+	fn onCreation():
+		label = "goblin"
+		print("Goblin ready")
 
-    fn speak() -> String:
-        return "Grr"
+	fn speak() -> String:
+		return "Grr"
 
 class Dragon extends Goblin:
-    var fire = 50
+	var fire = 50
 
-    fn onCreation(power):
-        super.onCreation()
-        fire = power
-        label = "dragon"
+	fn onCreation(power):
+		super.onCreation()
+		fire = power
+		label = "dragon"
 
-    fn speak() -> String:
-        return "ROAR (" + super.speak() + ")"
+	fn speak() -> String:
+		return "ROAR (" + super.speak() + ")"
 
-    fn hit(amount: Int):
-        super.hit(amount // 2)
+	fn hit(amount: Int):
+		super.hit(amount // 2)
 
 var e = Entity(7)
 var g = Goblin()
@@ -108,8 +108,8 @@ print(d.fire, d.loot, d.hp)
 
 var creatures: List[Entity] = [e, g, d]
 for c in creatures:
-    c.hit(10)
-    print(c.describe())
+	c.hit(10)
+	print(c.describe())
 
 # a list literal of subclasses takes the common parent class
 var mix = [g, d]
@@ -127,17 +127,17 @@ print(creatures.contains(g), p)
 
 # objects holding other objects
 class Team:
-    var members: List[Entity] = []
-    var leader = Entity(1)
+	var members: List[Entity] = []
+	var leader = Entity(1)
 
-    fn add(m: Entity):
-        members.add(m)
+	fn add(m: Entity):
+		members.add(m)
 
-    fn totalHp() -> Int:
-        var total = 0
-        for m in members:
-            total += m.hp
-        return total
+	fn totalHp() -> Int:
+		var total = 0
+		for m in members:
+			total += m.hp
+		return total
 
 var t = Team()
 t.add(g)

@@ -44,51 +44,51 @@ No string indexing, slicing or length yet. No quotes inside `{ }` of an f-string
 ```sn
 var hp = 40
 if hp > 50:
-    print("Healthy")
+	print("Healthy")
 orif hp > 0:                 # 'orif', not 'elif'
-    print("Injured")
+	print("Injured")
 else:
-    print("Dead")
+	print("Dead")
 
 var n = 0
 while n < 3:
-    n += 1
+	n += 1
 
 for i in 1..5:               # inclusive: 1 2 3 4 5
-    if i == 2:
-        continue
-    if i == 4:
-        break
-    print(i)
+	if i == 2:
+		continue
+	if i == 4:
+		break
+	print(i)
 for i in 1..<5:              # exclusive end: 1 2 3 4
-    print(i)
+	print(i)
 
 var kind = "Dragon"
 match kind:                  # cases are literals (Int, Float, String, Bool)
-    case "Goblin":
-        print("small")
-    case "Dragon":
-        print("big")
-    default:
-        print("?")
+	case "Goblin":
+		print("small")
+	case "Dragon":
+		print("big")
+	default:
+		print("?")
 ```
 Ranges count up only (`5..1` runs zero times) and have no step. A one-line block works: `if x > 1: print(x)`.
 
 ## Functions
 ```sn
 fn add(a, b):                          # untyped params: generic, specialised per call
-    return a + b
+	return a + b
 
 fn greet(who: String, punct: String = "!") -> String:   # types, default, return type
-    return "Hi " + who + punct
+	return "Hi " + who + punct
 
 fn fact(n: Int) -> Int:                # recursion needs -> ReturnType
-    if n <= 1:
-        return 1
-    return n * fact(n - 1)
+	if n <= 1:
+		return 1
+	return n * fact(n - 1)
 
 fn getPosition():                      # several values = a tuple
-    return 10, 20
+	return 10, 20
 
 print(add(1, 2), add(1.5, 2), greet("Ana"), greet("Bo", punct="?"), fact(10))
 var pos = getPosition()
@@ -109,7 +109,7 @@ empty.add(7)
 var mixed = [1, "two", 3.5, true, null]    # mixed types allowed
 print(nums, mixed)
 for x in nums:
-    print(x)
+	print(x)
 ```
 Methods: `length() add(x) remove(x) contains(x) merge(other) copy() clear() reverse() sort()
 sum() min() max() mean() filter(...)`. `remove` and `contains` return `Bool`.
@@ -127,10 +127,10 @@ print(p * 2, 10 - p, p + q, p * q, -p, p / 2)   # [2,4,6] [9,8,7] [5,7,9] [4,10,
 ### filter (returns a new list)
 ```sn
 fn isEven(number):
-    return number % 2 == 0
+	return number % 2 == 0
 
 fn greaterThan(number, minimum):
-    return number > minimum
+	return number > minimum
 
 var data = [1, 2, 3, 4, 5, 10, 15]
 var stuff = [1, 2, "Hi", "Hello", 3.5]
@@ -162,6 +162,5 @@ Compile errors show `file:line:col`, the source line and a caret. Runtime errors
 zero, empty `min()`, mismatched list lengths, bad `int("x")`, stack overflow, out of memory).
 
 ## Not implemented yet
-optional types (`T?`), functions as values (other than `filter(name)`), string indexing and
-length, `for` over anything but ranges, lists and dictionaries. These parse but give a clear
+optional types (`T?`), lambdas (function values are named functions only), `for` over anything but ranges, lists and dictionaries. These parse but give a clear
 "not implemented yet" error. Lambdas and enums are deliberately not in V1.

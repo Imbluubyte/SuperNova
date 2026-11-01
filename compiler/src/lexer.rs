@@ -194,6 +194,7 @@ struct Lexer<'a> {
     out: Vec<Token>,
     at_line_start: bool,
     file: u16,
+    indent_char: Option<char>,
     _src: &'a str,
 }
 
@@ -209,6 +210,7 @@ impl<'a> Lexer<'a> {
             out: Vec::new(),
             at_line_start: true,
             file: 0,
+            indent_char: None,
             _src: src,
         }
     }
@@ -309,14 +311,18 @@ impl<'a> Lexer<'a> {
         loop {
             let mut width = 0usize;
             let save = (self.pos, self.line, self.col);
+            let mut seen: Option<char> = None;
             while let Some(c) = self.peek() {
                 match c {
-                    ' ' => width += 1,
-                    '\t' => {
-                        return Err(CompileError::new(
-                            "tabs are not allowed for indentation; use 4 spaces",
-                            self.span(),
-                        ))
+                    ' ' | '\t' => {
+                        if seen.map_or(false, |k| k != c) {
+                            return Err(CompileError::new(
+                                "this line mixes tabs and spaces in its indentation; use one or the other",
+                                self.span(),
+                            ));
+                        }
+                        seen = Some(c);
+                        width += 1;
                     }
                     _ => break,
                 }
@@ -341,6 +347,23 @@ impl<'a> Lexer<'a> {
             }
             let _ = save;
             let sp = self.span();
+            if let Some(k) = seen {
+                // A file indents with tabs or with spaces, never both.
+                match self.indent_char {
+                    None => self.indent_char = Some(k),
+                    Some(first) if first != k => {
+                        return Err(CompileError::new(
+                            if first == '\t' {
+                                "this file indents with tabs, but this line is indented with spaces"
+                            } else {
+                                "this file indents with spaces, but this line is indented with a tab"
+                            },
+                            sp,
+                        ))
+                    }
+                    _ => {}
+                }
+            }
             let cur = *self.indents.last().unwrap();
             if width > cur {
                 self.indents.push(width);

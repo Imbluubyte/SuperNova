@@ -1,9 +1,9 @@
 fn say(s: String, v: Int) -> Int:
-    print(s)
-    return v
+	print(s)
+	return v
 
 print(say("a", 1) + say("b", 2) * say("c", 3))
 fn three(a: Int, b: Int, c: Int) -> Int:
-    return a + b + c
+	return a + b + c
 print(three(say("x", 1), say("y", 2), say("z", 3)))
 print(three(c=say("c", 3), a=say("a", 1), b=say("b", 2)))
