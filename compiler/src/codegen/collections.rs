@@ -38,6 +38,7 @@ impl<'a> Gen<'a> {
     pub(super) fn cty(&mut self, t: Ty) -> String {
         match t {
             Ty::Int | Ty::Enum(_) => "int64_t".into(),
+            Ty::Type => "SnStr*".into(),
             Ty::Float => "double".into(),
             Ty::Bool => "bool".into(),
             Ty::Str => "SnStr*".into(),
@@ -488,6 +489,12 @@ impl<'a> Gen<'a> {
         span: Span,
     ) -> R<E> {
         let o = self.val(obj)?;
+        if name == "type" && args.is_empty() {
+            let user_method = matches!(o.ty, Ty::Class(c) if self.find_method(c as usize, "type").is_some());
+            if !user_method {
+                return self.type_of(o, span);
+            }
+        }
         if let Ty::Opt(_) = o.ty {
             return Err(self.null_use(o.ty, &format!("call '.{}()' on", name), span));
         }
@@ -953,6 +960,7 @@ impl<'a> Gen<'a> {
                     format!("sn_buf_val_repr(&{}, {}); ", b, c)
                 }
             }
+            Ty::Type => format!("sn_buf_str(&{}, {}); ", b, c),
             Ty::Enum(e) => {
                 let text = self.enum_text(e as usize, true, c);
                 format!("sn_buf_str(&{}, {}); ", b, text)

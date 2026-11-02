@@ -368,6 +368,27 @@ var name = getInput("Name: ")
 var age = int(getInput("Age: "))
 ```
 
+## Checking types: `.type()`
+
+`x.type()` gives the type of a value, and a type name (`Int`, `Float`, `Bool`, `String`, `Null`,
+`List`, `Dict`, `Tuple`, or any class or enum name) can be compared with it using `==` / `!=`:
+
+```
+if x.type() == Int:
+	print("an integer")
+for item in mixed:                 # a mixed list
+	if item.type() == String:
+		print("text:", item)
+print(pet.type() == Dog)           # the object's actual class (a Dog is not == Animal)
+```
+
+Printing it shows the name (`print(x.type())` prints `Int`). Lists report `List` whatever they
+hold. For an optional it reports the held type, or `Null`. `.type()` does not narrow the type
+inside the `if`; to pick values out of a mixed list by type use `items.filter(int)`.
+
+Note that `/` always produces a Float (`20 / 10` is `2.0`), so `(x / 10).type() == Int` is never
+true. To test divisibility use `x % 10 == 0`.
+
 ## Standard library
 
 Modules shipped inside the compiler; import them with `use std.<name>`:

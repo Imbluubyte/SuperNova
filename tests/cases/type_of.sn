@@ -1,0 +1,29 @@
+var x = 13
+print(x.type())
+print(x.type() == Int, x.type() == Float, x.type() != String)
+print((x / 10).type() == Int, (x / 10).type() == Float, (x // 10).type() == Int)
+var s = "hi"
+if s.type() == String:
+	print("a string")
+var mixed = [1, "a", 2.5, true, null]
+for m in mixed:
+	print(m.type())
+class Animal:
+	var legs = 4
+class Dog extends Animal:
+	pass
+var a: Animal = Dog()
+print(a.type(), a.type() == Dog, a.type() == Animal)
+enum Color:
+	Red
+print(Color.Red.type() == Color, Color.Red.type())
+var o: Int? = null
+print(o.type())
+o = 4
+print(o.type())
+print([1, 2].type() == List, {"a": 1}.type())
+print(str(x.type()) + "!", f"{x.type()}")
+if x % 10 == 0:
+	print("divisible")
+else:
+	print("not divisible by 10")

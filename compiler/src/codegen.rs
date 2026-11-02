@@ -71,6 +71,8 @@ enum Ty {
     Class(u32),
     /// A user enum (index into `Gen::enums`); an Int underneath.
     Enum(u32),
+    /// The result of `.type()`: a type's name, comparable with Int, String, a class name, ...
+    Type,
 }
 
 impl Ty {
@@ -85,6 +87,7 @@ impl Ty {
             Ty::Any => "Any".into(),
             Ty::Class(c) => CLASS_NAMES.with(|n| n.borrow()[c as usize].clone()),
             Ty::Enum(e) => ENUM_NAMES.with(|n| n.borrow()[e as usize].clone()),
+            Ty::Type => "Type".into(),
             Ty::List(e) => format!("List[{}]", e.name()),
             Ty::Dict(k, v) => format!("Dict[{}, {}]", k.name(), v.name()),
             Ty::Task(t) => format!("Task[{}]", t.name()),
@@ -108,7 +111,7 @@ impl Ty {
         match self {
             Ty::Int | Ty::Float | Ty::Bool | Ty::Null | Ty::Void | Ty::Enum(_) => false,
             Ty::Func(..) => true,
-            Ty::Str | Ty::Any | Ty::List(_) | Ty::Dict(..) | Ty::Task(_) | Ty::Class(_) => true,
+            Ty::Str | Ty::Any | Ty::List(_) | Ty::Dict(..) | Ty::Task(_) | Ty::Class(_) | Ty::Type => true,
             Ty::Tuple(items) => items.iter().any(|t| t.has_ptrs()),
             Ty::Opt(t) => t.has_ptrs(),
         }
@@ -1131,6 +1134,9 @@ impl<'a> Gen<'a> {
                     ("str", Ty::Any) | ("str", Ty::List(_)) | ("str", Ty::Dict(..)) | ("str", Ty::Tuple(_)) | ("str", Ty::Class(_)) | ("str", Ty::Enum(_)) | ("str", Ty::Opt(_)) => {
                         (self.to_str(&v), Ty::Str)
                     }
+                    ("str", Ty::Type) => {
+                        (self.to_str(&v), Ty::Str)
+                    }
                     ("int", Ty::Int) => (v.c, Ty::Int),
                     ("int", Ty::Float) => (format!("sn_f2i({}, {})", v.c, loc), Ty::Int),
                     ("int", Ty::Str) => (format!("sn_str_to_int({}, {})", v.c, loc), Ty::Int),
@@ -1166,6 +1172,11 @@ impl<'a> Gen<'a> {
             ExprKind::Ident(name) => {
                 if self.fns.contains_key(name.as_str()) && !self.var_exists(name) {
                     return self.func_value(name, None, e.span);
+                }
+                if !self.var_exists(name) {
+                    if let Some(t) = self.type_value(name) {
+                        return Ok(t);
+                    }
                 }
                 let v = self.lookup(name, e.span)?;
                 Ok(E::new(v.cname, v.ty, !v.shared))
@@ -1260,6 +1271,22 @@ impl<'a> Gen<'a> {
         }
         if let Ty::Opt(_) = rt {
             return Err(self.null_use(rt, &format!("use '{}' on", op_sym(op)), span));
+        }
+        if lt == Ty::Type || rt == Ty::Type {
+            if lt == rt && matches!(op, Eq | Ne) {
+                let neg = if op == Ne { "!" } else { "" };
+                let c = self.seq2(&l, &r, move |x, y| format!("({}sn_str_eq({}, {}))", neg, x, y));
+                return Ok(E::new(c, Ty::Bool, pure));
+            }
+            return err(
+                format!(
+                    "cannot apply '{}' to {} and {}; compare a .type() with a type name using == or !=, e.g. x.type() == Int",
+                    op_sym(op),
+                    lt.name(),
+                    rt.name()
+                ),
+                span,
+            );
         }
         if let (Ty::Enum(a), Ty::Enum(b)) = (lt, rt) {
             if a == b && matches!(op, Eq | Ne) {

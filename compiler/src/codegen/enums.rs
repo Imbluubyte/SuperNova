@@ -104,3 +104,84 @@ impl<'a> Gen<'a> {
 		})())
 	}
 }
+
+impl<'a> Gen<'a> {
+	/// A type name used as a value (`Int`, `String`, a class or enum name): a Type constant.
+	pub(super) fn type_value(&mut self, name: &str) -> Option<E> {
+		let known = matches!(name, "Int" | "Float" | "Bool" | "String" | "Null" | "List" | "Dict" | "Tuple")
+			|| self.class_ix.contains_key(name)
+			|| self.enum_ix.contains_key(name);
+		if !known {
+			return None;
+		}
+		let shown = crate::modules::bare_name(name);
+		Some(E::new(self.str_lit(&shown), Ty::Type, true))
+	}
+
+	fn type_lit(&mut self, s: &str) -> String {
+		self.str_lit(s)
+	}
+
+	/// `x.type()`: the type of a value. Lists, dictionaries and tuples report "List", "Dict" and
+	/// "Tuple"; objects report their actual class.
+	pub(super) fn type_of(&mut self, o: E, span: Span) -> R<E> {
+		let _ = span;
+		let k = self.fresh();
+		let text = match o.ty {
+			Ty::Int => Some("Int".to_string()),
+			Ty::Float => Some("Float".to_string()),
+			Ty::Bool => Some("Bool".to_string()),
+			Ty::Str => Some("String".to_string()),
+			Ty::Null => Some("Null".to_string()),
+			Ty::List(_) => Some("List".to_string()),
+			Ty::Dict(..) => Some("Dict".to_string()),
+			Ty::Tuple(_) => Some("Tuple".to_string()),
+			Ty::Func(..) => Some("Fn".to_string()),
+			Ty::Task(_) => Some("Task".to_string()),
+			Ty::Type => Some("Type".to_string()),
+			Ty::Enum(e) => Some(crate::modules::bare_name(&self.enums[e as usize].name)),
+			_ => None,
+		};
+		if let Some(t) = text {
+			let lit = self.type_lit(&t);
+			let c = if o.pure { lit } else { format!("({{ (void)({}); {}; }})", o.c, lit) };
+			return Ok(E::new(c, Ty::Type, o.pure));
+		}
+		match o.ty {
+			Ty::Class(_) => {
+				let mut s = format!("({{ int64_t ct{k} = ({c})->cls; ", k = k, c = o.c);
+				let n = self.classes.len();
+				for i in 0..n {
+					let lit = self.type_lit(&crate::modules::bare_name(&self.classes[i].name));
+					s.push_str(&format!("ct{} == {} ? {} : ", k, self.classes[i].id_lo, lit));
+				}
+				let unk = self.type_lit("Object");
+				s.push_str(&format!("{}; }})", unk));
+				Ok(E::new(s, Ty::Type, false))
+			}
+			Ty::Any => {
+				let names = [("SN_T_INT", "Int"), ("SN_T_FLOAT", "Float"), ("SN_T_BOOL", "Bool"), ("SN_T_STR", "String")];
+				let mut s = format!("({{ SnVal av{k} = {c}; ", k = k, c = o.c);
+				for (tag, n) in names {
+					let lit = self.type_lit(n);
+					s.push_str(&format!("av{}.tag == {} ? {} : ", k, tag, lit));
+				}
+				let lit = self.type_lit("Null");
+				s.push_str(&format!("{}; }})", lit));
+				Ok(E::new(s, Ty::Type, false))
+			}
+			Ty::Opt(inner) => {
+				let on = self.type_name(o.ty);
+				let inner_e = E::new(format!("ov{}.v", k), *inner, true);
+				let t = self.type_of(inner_e, span)?;
+				let null = self.type_lit("Null");
+				Ok(E::new(
+					format!("({{ {on} ov{k} = {c}; ov{k}.has ? {t} : {null}; }})", on = on, k = k, c = o.c, t = t.c, null = null),
+					Ty::Type,
+					false,
+				))
+			}
+			_ => err("this value has no type()", span),
+		}
+	}
+}
