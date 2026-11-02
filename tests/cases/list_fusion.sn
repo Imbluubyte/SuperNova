@@ -1,0 +1,21 @@
+var xs = [1, 2, 3, 4]
+var ys = [10, 20, 30, 40]
+print(xs * 2 + 1)
+print(1 + xs * 2 - 3)
+print((xs + ys) * 2 + xs)
+print(xs * 2.5 + 1)
+print((xs + 1) * (ys - 1))
+print(ys // 3 + xs % 2)
+print(-(xs * 2))
+var zs = [1.5, 2.5]
+print((zs * 2 + 1) / 2)
+fn side(n: Int) -> Int:
+	print("side", n)
+	return n
+print(xs * side(2) + side(3))
+try:
+	print((xs + [1, 2]) * 2)
+catch e:
+	print(e)
+var ws = [1,2,3]
+print((ws * 2 + 1).sum(), ws.sum(), (ws + 1.5).sum())

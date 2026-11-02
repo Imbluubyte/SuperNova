@@ -358,6 +358,16 @@ top level of a file, can be `private`, and are used from other modules as `mod.D
 `extern fn name(params) -> T` (no body) declares a function provided by a host program, and
 `export fn` marks a function the host may call; see [EMBEDDING.md](EMBEDDING.md).
 
+## Reading input
+
+`getInput()` reads one line from the terminal (without the newline) and returns it as a String;
+`getInput("Name: ")` prints a prompt first. At end of input it raises a catchable error.
+
+```
+var name = getInput("Name: ")
+var age = int(getInput("Age: "))
+```
+
 ## Standard library
 
 Modules shipped inside the compiler; import them with `use std.<name>`:

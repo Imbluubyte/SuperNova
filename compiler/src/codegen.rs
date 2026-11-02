@@ -147,11 +147,23 @@ struct E {
     c: String,
     ty: Ty,
     pure: bool,
+    /// For an elementwise list expression: how to compute it in one pass, so that
+    /// `xs * 2 + 1` does not build a temporary list (see `list_binary`).
+    fused: Option<Box<Fuse>>,
+}
+
+struct Fuse {
+    /// Statements that evaluate the operands, in source order.
+    setup: String,
+    /// Length of the result, valid after `setup`.
+    len: String,
+    /// The element expression, with `@I` standing for the loop index.
+    elem: String,
 }
 
 impl E {
     fn new(c: impl Into<String>, ty: Ty, pure: bool) -> E {
-        E { c: c.into(), ty, pure }
+        E { c: c.into(), ty, pure, fused: None }
     }
 }
 
@@ -253,7 +265,7 @@ impl Ctx {
     }
 }
 
-const BUILTINS: [&str; 9] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile"];
+const BUILTINS: [&str; 10] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput"];
 
 struct Gen<'a> {
     uses_async: bool,
@@ -828,7 +840,7 @@ impl<'a> Gen<'a> {
         let r = self.call_inner(callee, args, span);
         // a called function may reassign a global, so what we knew about globals is stale
         let builtin = matches!(&callee.kind, ExprKind::Ident(n)
-            if n.starts_with("__") || matches!(n.as_str(), "print" | "str" | "int" | "float" | "gcCollect" | "gcHeapBytes" | "sleep"));
+            if n.starts_with("__") || matches!(n.as_str(), "print" | "str" | "int" | "float" | "gcCollect" | "gcHeapBytes" | "sleep" | "getInput"));
         if !builtin {
             self.cx.narrowed.retain(|k, _| !k.starts_with("g_"));
         }
@@ -877,7 +889,7 @@ impl<'a> Gen<'a> {
         }
         let Some(&decl) = self.fns.get(name) else {
             let mut names: Vec<&str> = self.fns.keys().map(|k| k.as_str()).collect();
-            names.extend(["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "min", "max", "sum", "abs", "len"]);
+            names.extend(["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "min", "max", "sum", "abs", "len"]);
             let hint = did_you_mean(name, names);
             return err(format!("undefined function '{}'{}", name, hint), span);
         };
@@ -1081,6 +1093,20 @@ impl<'a> Gen<'a> {
                 s.push_str("sn_print_nl(); })");
                 Ok(E::new(s, Ty::Void, false))
             }
+            "getInput" => {
+                if args.len() > 1 {
+                    return err("getInput() takes an optional prompt, e.g. getInput(\"Name: \")", span);
+                }
+                let loc = self.loc(span);
+                if let Some(a) = args.first() {
+                    let p = self.val(&a.value)?;
+                    if p.ty != Ty::Str {
+                        return err(format!("the prompt for getInput() must be a String, got {}", p.ty.name()), a.value.span);
+                    }
+                    return Ok(E::new(format!("({{ sn_write({}); sn_read_line({}); }})", p.c, loc), Ty::Str, false));
+                }
+                Ok(E::new(format!("sn_read_line({})", loc), Ty::Str, false))
+            }
             "str" | "int" | "float" => {
                 if args.len() != 1 {
                     return err(format!("'{}' takes exactly one argument", name), span);
@@ -1093,7 +1119,7 @@ impl<'a> Gen<'a> {
                     ("str", Ty::Float) => (format!("sn_float_to_str({})", v.c), Ty::Str),
                     ("str", Ty::Bool) => (format!("sn_bool_to_str({})", v.c), Ty::Str),
                     ("str", Ty::Null) => (format!("sn_null_to_str({})", v.c), Ty::Str),
-                    ("str", Ty::Any) | ("str", Ty::List(_)) | ("str", Ty::Dict(..)) | ("str", Ty::Tuple(_)) | ("str", Ty::Class(_)) => {
+                    ("str", Ty::Any) | ("str", Ty::List(_)) | ("str", Ty::Dict(..)) | ("str", Ty::Tuple(_)) | ("str", Ty::Class(_)) | ("str", Ty::Enum(_)) | ("str", Ty::Opt(_)) => {
                         (self.to_str(&v), Ty::Str)
                     }
                     ("int", Ty::Int) => (v.c, Ty::Int),

@@ -273,3 +273,14 @@ fn library_builds_can_be_driven_by_a_c_host() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn get_input_reads_lines_from_stdin() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let sn = root().join("stdin_demo.sn");
+    let mut child = snc().arg("run").arg(&sn).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"Ada\n21\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "Name: Hello Ada!\n42\neof: end of input\n");
+}

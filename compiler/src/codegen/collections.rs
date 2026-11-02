@@ -491,6 +491,19 @@ impl<'a> Gen<'a> {
         if let Ty::Opt(_) = o.ty {
             return Err(self.null_use(o.ty, &format!("call '.{}()' on", name), span));
         }
+        if let (Some(f), "sum", Ty::List(el)) = (&o.fused, name, o.ty) {
+            // sum of an elementwise expression: one pass, no temporary list
+            if args.is_empty() {
+                let n = self.fresh();
+                let ec = self.cty(*el);
+                let elem = f.elem.replace("@I", &format!("i{}", n));
+                let c = format!(
+                    "({{ {setup}{ec} s{n} = 0; for (int64_t i{n} = 0; i{n} < {len}; i{n}++) s{n} += {elem}; s{n}; }})",
+                    setup = f.setup, ec = ec, n = n, len = f.len, elem = elem
+                );
+                return Ok(E::new(c, *el, false));
+            }
+        }
         if let Ty::Class(c) = o.ty {
             return self.call_method(o, c as usize, name, args, span, false);
         }
@@ -820,31 +833,51 @@ impl<'a> Gen<'a> {
                 span,
             );
         }
-        let (ltmp, rtmp) = (format!("la{}", n), format!("lb{}", n));
-        let lelem = if le.is_some() { format!("{}->data[i{}]", ltmp, n) } else { ltmp.clone() };
-        let relem = if re.is_some() { format!("{}->data[i{}]", rtmp, n) } else { rtmp.clone() };
-        let res = self.binary(op, E::new(lelem, lt, true), E::new(relem, rt, true), span)?;
+        // Operands that are themselves elementwise results are folded into this loop.
+        let mut setup = String::new();
+        let mut lens: Vec<String> = Vec::new();
+        let mut parts = Vec::new();
+        for (side, e, is_list, ety) in [("a", l, le.is_some(), lt), ("b", r, re.is_some(), rt)] {
+            let tmp = format!("l{}{}", side, n);
+            if let Some(f) = e.fused {
+                setup.push_str(&f.setup);
+                lens.push(f.len.clone());
+                parts.push(E::new(f.elem, ety, true));
+            } else if is_list {
+                let tc = self.cty(e.ty);
+                setup.push_str(&format!("{} {} = {}; ", tc, tmp, e.c));
+                lens.push(format!("{}->len", tmp));
+                parts.push(E::new(format!("{}->data[@I]", tmp), ety, true));
+            } else {
+                let tc = self.cty(e.ty);
+                setup.push_str(&format!("{} {} = {}; ", tc, tmp, e.c));
+                parts.push(E::new(tmp, ety, true));
+            }
+        }
+        let mut it = parts.into_iter();
+        let (pl, pr) = (it.next().unwrap(), it.next().unwrap());
+        let res = self.binary(op, pl, pr, span)?;
         let rl = Ty::list_of(res.ty);
         let rn = self.type_name(rl);
-        let (lc, rc) = (self.cty(l.ty), self.cty(r.ty));
-        let mut s = format!("({{ {} {} = {}; {} {} = {}; ", lc, ltmp, l.c, rc, rtmp, r.c);
-        let len = if le.is_some() { format!("{}->len", ltmp) } else { format!("{}->len", rtmp) };
-        if le.is_some() && re.is_some() {
-            s.push_str(&format!(
-                "if ({a}->len != {b}->len) sn_panic({loc}, \"elementwise operation on lists of different lengths (%\" PRId64 \" and %\" PRId64 \")\", {a}->len, {b}->len); ",
-                a = ltmp,
-                b = rtmp,
+        let len = format!("n{}", n);
+        if lens.len() == 2 {
+            setup.push_str(&format!(
+                "if ({a} != {b}) sn_panic({loc}, \"elementwise operation on lists of different lengths (%\" PRId64 \" and %\" PRId64 \")\", {a}, {b}); ",
+                a = lens[0],
+                b = lens[1],
                 loc = loc
             ));
         }
-        s.push_str(&format!(
-            "{rn}* res{n} = {rn}_new({len}); for (int64_t i{n} = 0; i{n} < {len}; i{n}++) res{n}->data[i{n}] = {e}; res{n}->len = {len}; res{n}; }})",
-            rn = rn,
-            n = n,
-            len = len,
-            e = res.c
-        ));
-        Ok(E::new(s, rl, false))
+        setup.push_str(&format!("int64_t {} = {}; ", len, lens[0]));
+        let idx = format!("i{}", n);
+        let elem = res.c.replace("@I", &idx);
+        let c = format!(
+            "({{ {setup}{rn}* res{n} = {rn}_new({len}); for (int64_t {i} = 0; {i} < {len}; {i}++) res{n}->data[{i}] = {e}; res{n}->len = {len}; res{n}; }})",
+            setup = setup, rn = rn, n = n, len = len, i = idx, e = elem
+        );
+        let mut out = E::new(c, rl, false);
+        out.fused = Some(Box::new(Fuse { setup, len, elem: res.c }));
+        Ok(out)
     }
 
     pub(super) fn list_neg(&mut self, v: E, span: Span) -> R<E> {

@@ -1,0 +1,8 @@
+var name = getInput("Name: ")
+print(f"Hello {name}!")
+var n = int(getInput())
+print(n * 2)
+try:
+	getInput()
+catch e:
+	print("eof:", e)
