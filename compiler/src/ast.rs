@@ -140,6 +140,8 @@ pub struct ClassDecl {
     pub fields: Vec<Stmt>,
     pub methods: Vec<FnDecl>,
     pub is_private: bool,
+    /// `export class`: the host can create instances and call their public members.
+    pub is_export: bool,
     pub span: Span,
 }
 

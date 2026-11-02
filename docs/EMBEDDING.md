@@ -81,12 +81,45 @@ when it is set). `snc` itself runs on your development machine or in Termux; the
 needs the finished `.so`. Plain JNI works the same way: declare the functions from the header
 in a small C file and call them from your `external fun`s.
 
+## Script objects: `export class`
+
+```
+export class Player:
+	var speed = 100.0
+	var name = "hero"
+	fn onCreation(id: Int):
+		...
+	fn onUpdate(dt: Float):
+		...
+```
+
+For each exported class the header gains (only for members whose types are Int, Float, Bool or
+String; the rest stay script-only):
+
+| Function | Meaning |
+| --- | --- |
+| `int64_t sn_new_Player(args...)` | Create an object (arguments are `onCreation`'s, which must be annotated). Returns a handle, 0 on error. |
+| `sn_Player_<method>(handle, args...)` | Call a public method, including inherited and overridden ones (dispatch is virtual). |
+| `sn_Player_get_<field>(handle)`, `sn_Player_set_<field>(handle, v)` | Read / write a public field (`const` fields have no setter). |
+| `void sn_release(int64_t handle)` | Let the script object be collected. The object lives until released. |
+
+A handle is a small positive integer. Using a released handle, or one from a different class,
+is a reported error rather than a crash. Methods and fields whose name starts with `_` or that
+are `private` are not exported.
+
+## Async: `sn_pump()`
+
+`int sn_pump(void)` runs tasks that are ready (timers that have expired, finished file reads)
+without blocking, and returns 1 if tasks are still waiting, 0 if idle, -1 if a task failed
+without being awaited (`sn_last_error()` has the details). Call it once per frame. Top-level
+`await` in the script and `await` inside a non-async exported function block until done.
+
 ## Rules and limits
 
 * Calls are serialised: one thread runs script code at a time (others wait). Calls from a host
   callback back into the library on the same thread are fine.
 * The script's memory is managed by its own garbage collector; nothing needs freeing by the host.
-* `async`/`await` is not available in library builds yet (compile error).
+* `async`/`await` works, but tasks only advance when the host calls `sn_pump()` (see below).
 * Fatal conditions (out of memory, stack overflow) still end the process; ordinary script
   errors do not.
 * `print` writes to stdout, which Android does not show; route logging through an `extern fn`.

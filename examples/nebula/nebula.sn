@@ -1,0 +1,77 @@
+# nebula.sn - a PROPOSED scripting API for the Nebula engine.
+#
+# The engine (Kotlin) implements the extern functions below and registers them with
+# sn_set_extern_<name>(callback). Each node in the scene tree has an integer id; a script
+# object wraps that id and talks to the engine through these functions.
+# Names and shapes are a starting point: change them to match the engine.
+
+# ---- provided by the engine -------------------------------------------------
+extern fn nb_log(message: String)
+extern fn nb_get_x(id: Int) -> Float
+extern fn nb_get_y(id: Int) -> Float
+extern fn nb_set_position(id: Int, x: Float, y: Float)
+extern fn nb_get_rotation(id: Int) -> Float
+extern fn nb_set_rotation(id: Int, radians: Float)
+extern fn nb_set_visible(id: Int, visible: Bool)
+extern fn nb_add_child(parent: Int, child: Int)
+extern fn nb_free(id: Int)
+extern fn nb_is_pressed(action: String) -> Bool
+extern fn nb_axis(negative: String, positive: String) -> Float
+extern fn nb_play_sound(name: String)
+
+fn log(message: String):
+	nb_log(message)
+
+fn isPressed(action: String) -> Bool:
+	return nb_is_pressed(action)
+
+# -1.0 .. 1.0, e.g. nebula.axis("left", "right")
+fn axis(negative: String, positive: String) -> Float:
+	return nb_axis(negative, positive)
+
+fn playSound(name: String):
+	nb_play_sound(name)
+
+# ---- signals ----------------------------------------------------------------
+# A signal holds callbacks. The engine (or other scripts) call emit().
+class Signal:
+	var listeners: List[Fn()] = []
+	fn connect(handler: Fn()):
+		listeners.add(handler)
+	fn emit():
+		for h in listeners:
+			h()
+
+# ---- base classes -----------------------------------------------------------
+class Node:
+	var id = 0
+	var name = "Node"
+	fn onCreation(id: Int):
+		self.id = id
+	# the engine calls these; override them in your script
+	fn onReady():
+		pass
+	fn onUpdate(dt: Float):
+		pass
+	fn onFree():
+		pass
+	fn addChild(child: Node):
+		nb_add_child(id, child.id)
+	fn free():
+		nb_free(id)
+
+class Node2D extends Node:
+	fn x() -> Float:
+		return nb_get_x(id)
+	fn y() -> Float:
+		return nb_get_y(id)
+	fn setPosition(x: Float, y: Float):
+		nb_set_position(id, x, y)
+	fn moveBy(dx: Float, dy: Float):
+		nb_set_position(id, nb_get_x(id) + dx, nb_get_y(id) + dy)
+	fn rotation() -> Float:
+		return nb_get_rotation(id)
+	fn setRotation(radians: Float):
+		nb_set_rotation(id, radians)
+	fn setVisible(visible: Bool):
+		nb_set_visible(id, visible)

@@ -1,0 +1,28 @@
+use nebula
+use std.math
+
+export class Player extends nebula.Node2D:
+	var speed = 160.0
+	var health = 3
+	var hit = nebula.Signal()
+
+	fn onReady():
+		nebula.log("player ready")
+
+	fn onUpdate(dt: Float):
+		var dx = nebula.axis("left", "right")
+		var dy = nebula.axis("up", "down")
+		moveBy(dx * speed * dt, dy * speed * dt)
+		if nebula.isPressed("jump"):
+			nebula.playSound("jump")
+
+	fn takeDamage(amount: Int) -> Bool:
+		health -= amount
+		hit.emit()
+		return health > 0
+
+export class Spinner extends nebula.Node2D:
+	var turnsPerSecond = 0.5
+
+	fn onUpdate(dt: Float):
+		setRotation(rotation() + 2.0 * math.PI * turnsPerSecond * dt)

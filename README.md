@@ -10,6 +10,7 @@ to native executables today. Optional types, lambdas, enums, `has`, `repeat` and
 
 * [Language reference](docs/LANGUAGE.md) (implemented subset)
 * [Embedding in Kotlin / C hosts](docs/EMBEDDING.md)
+* [Using SuperNova as the Nebula engine's scripting language](docs/NEBULA.md)
 * [Architecture and design decisions](docs/ARCHITECTURE.md)
 * [Memory management and the garbage collector](docs/MEMORY.md)
 * [**Android / Termux guide**](docs/TERMUX.md)

@@ -1,0 +1,14 @@
+init=1
+handles 1 2
+[host] node 7 -> (25, 0)
+hero@(25.0, 0.0) | hero@(25.0, 0.0)
+x=25 kind=Node2D
+hurt=1 hurt=0
+err=[Error: boom
+  at nodes.sn:33:3]
+err=[RuntimeError: handle 2 is not a Player
+  at <host call>]
+err=[RuntimeError: invalid or released handle 1
+  at <host call>]
+keeper: keeper@(0.0, 0.0)
+reused handle: 3

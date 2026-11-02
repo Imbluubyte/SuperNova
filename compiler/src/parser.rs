@@ -189,6 +189,12 @@ impl Parser {
                 f.is_export = !is_extern;
                 StmtKind::Fn(f)
             }
+            Tok::Ident(ref n) if n == "export" && self.peek_at(1) == &Tok::Class => {
+                self.bump();
+                let mut c = self.class_decl()?;
+                c.is_export = true;
+                StmtKind::Class(c)
+            }
             Tok::Ident(ref n) if n == "elif" => {
                 return Err(CompileError::new(
                     "'elif' is not part of SuperNova; use 'orif'",
@@ -485,7 +491,7 @@ impl Parser {
                 }
             }
         }
-        Ok(ClassDecl { name, parent, fields, methods, is_private: false, span })
+        Ok(ClassDecl { name, parent, fields, methods, is_private: false, is_export: false, span })
     }
 
     fn if_stmt(&mut self) -> PResult<StmtKind> {

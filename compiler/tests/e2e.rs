@@ -248,13 +248,27 @@ fn stack_overflow_inside_a_task_is_reported() {
 
 #[test]
 fn library_builds_can_be_driven_by_a_c_host() {
-    let dir = std::env::temp_dir().join(format!("sn-embed-{}", std::process::id()));
+    run_embed("embed", "game", "libgame");
+}
+
+#[test]
+fn exported_classes_work_through_handles() {
+    run_embed("embed2", "nodes", "libnodes");
+}
+
+#[test]
+fn async_tasks_run_when_the_host_pumps() {
+    run_embed("embed3", "tasks", "libtasks");
+}
+
+fn run_embed(dirname: &str, script: &str, libname: &str) {
+    let dir = std::env::temp_dir().join(format!("sn-{}-{}", dirname, std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let src = root().join("embed");
-    let lib = dir.join("libgame.so");
-    let b = snc().arg("build").arg(src.join("game.sn")).arg("--lib").arg("-o").arg(&lib).output().unwrap();
+    let src = root().join(dirname);
+    let lib = dir.join(format!("{}.so", libname));
+    let b = snc().arg("build").arg(src.join(format!("{}.sn", script))).arg("--lib").arg("-o").arg(&lib).output().unwrap();
     assert!(b.status.success(), "lib build failed:\n{}", String::from_utf8_lossy(&b.stderr));
-    assert!(dir.join("libgame.h").exists(), "header was not written");
+    assert!(dir.join(format!("{}.h", libname)).exists(), "header was not written");
     let host = dir.join("host");
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
     let c = Command::new(&cc).arg(src.join("host.c")).arg("-o").arg(&host).args(["-ldl", "-lpthread"]).output().unwrap();
@@ -283,4 +297,27 @@ fn get_input_reads_lines_from_stdin() {
     child.stdin.take().unwrap().write_all(b"Ada\n21\n").unwrap();
     let out = child.wait_with_output().unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), "Name: Hello Ada!\n42\neof: end of input\n");
+}
+
+#[test]
+fn nebula_example_api_builds_as_a_library() {
+    let dir = std::env::temp_dir().join(format!("sn-nebula-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ex = root().join("..").join("examples").join("nebula");
+    let lib = dir.join("libplayer.so");
+    let b = snc()
+        .arg("build")
+        .arg(ex.join("player.sn"))
+        .arg("--lib")
+        .args(["-I", ex.to_str().unwrap()])
+        .arg("-o")
+        .arg(&lib)
+        .output()
+        .unwrap();
+    assert!(b.status.success(), "build failed:\n{}", String::from_utf8_lossy(&b.stderr));
+    let header = std::fs::read_to_string(dir.join("libplayer.h")).unwrap();
+    for needle in ["sn_new_Player", "sn_Player_onUpdate", "sn_new_Spinner", "sn_set_extern_nb_set_position", "sn_pump"] {
+        assert!(header.contains(needle), "header lacks {}", needle);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

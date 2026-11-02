@@ -1,0 +1,24 @@
+var ticks = 0
+var log: List[String] = []
+
+async fn blink(times: Int, gap: Float):
+	for i in 1..times:
+		await sleep(gap)
+		ticks += 1
+	log.add("blink done")
+
+async fn failing():
+	await sleep(0.01)
+	throw "task failed"
+
+export fn startBlink(n: Int):
+	blink(n, 0.02)
+
+export fn startFailing():
+	failing()
+
+export fn getTicks() -> Int:
+	return ticks
+
+export fn lastLog() -> String:
+	return log.join(",")

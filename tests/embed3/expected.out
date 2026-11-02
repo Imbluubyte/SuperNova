@@ -1,0 +1,6 @@
+init=1
+pump=0 ticks=3 log=blink done
+pump=-1 err=[Error: task failed
+  at tasks.sn:12:2
+  (in a task that was never awaited)]
+idle pump=0

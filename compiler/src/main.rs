@@ -22,7 +22,7 @@ const ASYNC_H: &str = include_str!("../../runtime/snasync.h");
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  snc check  <file.sn>\n  snc emit-c <file.sn>\n  snc build  <file.sn> [-o output] [--lib]\n  snc run    <file.sn>\n  snc doctor     (check this installation)\n  snc version"
+        "usage:\n  snc check  <file.sn>\n  snc emit-c <file.sn>\n  snc build  <file.sn> [-o output] [--lib]\n  (any command accepts -I <folder> to add a module search folder)\n  snc run    <file.sn>\n  snc doctor     (check this installation)\n  snc version"
     );
     exit(2);
 }
@@ -294,6 +294,16 @@ fn main() {
         usage();
     }
     let mut args = args;
+    // `-I dir` adds a folder to search for modules (same as SN_PATH)
+    while let Some(i) = args.iter().position(|a| a == "-I") {
+        if i + 1 >= args.len() {
+            usage();
+        }
+        let dir = args.remove(i + 1);
+        args.remove(i);
+        let cur = std::env::var("SN_PATH").unwrap_or_default();
+        std::env::set_var("SN_PATH", if cur.is_empty() { dir } else { format!("{}:{}", dir, cur) });
+    }
     if args[2] == "--lib" && args.len() > 3 {
         args.swap(2, 3);
     }

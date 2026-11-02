@@ -1,0 +1,33 @@
+extern fn hostSetPos(id: Int, x: Float, y: Float)
+
+export class Node2D:
+	var id = 0
+	var x = 0.0
+	var y = 0.0
+	var name = "node"
+	const kind = "Node2D"
+	fn onCreation(id: Int, name: String):
+		self.id = id
+		self.name = name
+	fn onReady():
+		pass
+	fn onUpdate(dt: Float):
+		pass
+	fn describe() -> String:
+		return f"{name}@({x}, {y})"
+	fn moveBy(dx: Float, dy: Float):
+		x += dx
+		y += dy
+		hostSetPos(id, x, y)
+
+export class Player extends Node2D:
+	var speed = 100.0
+	var alive = true
+	fn onUpdate(dt: Float):
+		moveBy(speed * dt, 0.0)
+	fn hurt(n: Int) -> Bool:
+		if n > 3:
+			alive = false
+		return alive
+	fn explode():
+		throw "boom"

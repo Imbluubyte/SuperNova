@@ -14,6 +14,7 @@
 - [x] 10. Standard library (strings, std.math, std.random, std.time, std.sys, std.fs) and first-class functions
 - [x] 10b. Optional types, null safety, `has`, `repeat`, `time.measure`
 - [x] 10c. Lambdas, enums, host embedding (`extern fn`, `export fn`, `snc build --lib`)
+- [x] 10d. Exported classes (handles), async pump, extern sharing across modules, `-I` search folders; Nebula integration guide + example API
 - [ ] 11. Termux build and on-device testing
 - [ ] 12. Optimisation passes and benchmarks
 - [ ] 13. Nebula integration interface
