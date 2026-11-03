@@ -111,7 +111,7 @@ Implemented: variables/types, f-strings, control flow, functions (generic, defau
 lists/tuples/dicts, classes (single inheritance), modules + `private`, try/catch/finally,
 async/await, strings + small stdlib (`std.math/random/time/sys/fs`), lambdas, enums, optionals +
 null safety, `has`, `repeat`, `getInput()`, `.type()`, f-string format specs (`__fmt`), `static` members,
-`dict.items()`/`enumerate`/tuple-unpack `for`, list `insert/pop/index/first/last/slice/sortBy`, host embedding for Nebula, GC.
+`dict.items()`/`indexed`/tuple-unpack `for`, list `insert/pop/index/first/last/slice/sortBy`, host embedding for Nebula, GC.
 Ideas not done: `snc fmt`, generic classes, interfaces/traits, struct-like value types,
 object handles passed *as arguments* across the host boundary, test framework (`snc test`),
 on-device Android check of a Termux-built `.so`.

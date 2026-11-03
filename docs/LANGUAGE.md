@@ -392,7 +392,7 @@ true. To test divisibility use `x % 10 == 0`.
 ## Formatting, iteration and list helpers
 
 * F-string specs: `f"{x:.2f}"`, `{n:05d}`, `{s:>8}`, `{s:*^9}`, `{n:x}`, `{n:+d}` (`[[fill]align][+][0][width][.prec][type]`).
-* `for i, v in enumerate(xs)` and `for k, v in d.items()` unpack tuples.
+* `for i, v in indexed(xs)` and `for k, v in d.items()` unpack tuples.
 * `static` members in classes: `static var count = 0`, `static fn make()`; use as `Class.name`.
 * List methods: `insert(i, v)`, `pop()` / `pop(i)`, `index(v)` (Int?, 1-based, null if absent), `first()`, `last()`,
   `slice(a, b)` (inclusive, 1-based), `sortBy(fn)` (stable; key Int/Float/String).

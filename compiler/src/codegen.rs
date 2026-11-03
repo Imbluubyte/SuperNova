@@ -268,7 +268,7 @@ impl Ctx {
     }
 }
 
-const BUILTINS: [&str; 11] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "enumerate"];
+const BUILTINS: [&str; 11] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "indexed"];
 
 struct Gen<'a> {
     uses_async: bool,
@@ -852,7 +852,7 @@ impl<'a> Gen<'a> {
         let r = self.call_inner(callee, args, span);
         // a called function may reassign a global, so what we knew about globals is stale
         let builtin = matches!(&callee.kind, ExprKind::Ident(n)
-            if n.starts_with("__") || matches!(n.as_str(), "print" | "str" | "int" | "float" | "gcCollect" | "gcHeapBytes" | "sleep" | "getInput" | "enumerate"));
+            if n.starts_with("__") || matches!(n.as_str(), "print" | "str" | "int" | "float" | "gcCollect" | "gcHeapBytes" | "sleep" | "getInput" | "indexed"));
         if !builtin {
             self.cx.narrowed.retain(|k, _| !k.starts_with("g_"));
         }
@@ -905,7 +905,7 @@ impl<'a> Gen<'a> {
         }
         let Some(&decl) = self.fns.get(name) else {
             let mut names: Vec<&str> = self.fns.keys().map(|k| k.as_str()).collect();
-            names.extend(["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "enumerate", "min", "max", "sum", "abs", "len"]);
+            names.extend(["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "indexed", "min", "max", "sum", "abs", "len"]);
             let hint = did_you_mean(name, names);
             return err(format!("undefined function '{}'{}", name, hint), span);
         };
@@ -1109,13 +1109,13 @@ impl<'a> Gen<'a> {
                 s.push_str("sn_print_nl(); })");
                 Ok(E::new(s, Ty::Void, false))
             }
-            "enumerate" => {
+            "indexed" => {
                 if args.len() != 1 {
-                    return err("enumerate() takes one list, e.g. for i, x in enumerate(items)", span);
+                    return err("indexed() takes one list, e.g. for i, x in indexed(items)", span);
                 }
                 let l = self.val(&args[0].value)?;
                 let Ty::List(el) = l.ty else {
-                    return err(format!("enumerate() needs a list, got {}", l.ty.name()), args[0].value.span);
+                    return err(format!("indexed() needs a list, got {}", l.ty.name()), args[0].value.span);
                 };
                 let tt = Ty::tuple_of(vec![Ty::Int, *el]);
                 let lty = Ty::list_of(tt);

@@ -2,7 +2,7 @@ var d = {"a": 1, "b": 2}
 for k, v in d.items():
 	print(k, v)
 var names = ["x", "y", "z"]
-for i, n in enumerate(names):
+for i, n in indexed(names):
 	print(i, n)
 var pairs = [(1, "one"), (2, "two")]
 for num, word in pairs:
