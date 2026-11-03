@@ -268,7 +268,7 @@ impl Ctx {
     }
 }
 
-const BUILTINS: [&str; 10] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput"];
+const BUILTINS: [&str; 11] = ["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "enumerate"];
 
 struct Gen<'a> {
     uses_async: bool,
@@ -852,7 +852,7 @@ impl<'a> Gen<'a> {
         let r = self.call_inner(callee, args, span);
         // a called function may reassign a global, so what we knew about globals is stale
         let builtin = matches!(&callee.kind, ExprKind::Ident(n)
-            if n.starts_with("__") || matches!(n.as_str(), "print" | "str" | "int" | "float" | "gcCollect" | "gcHeapBytes" | "sleep" | "getInput"));
+            if n.starts_with("__") || matches!(n.as_str(), "print" | "str" | "int" | "float" | "gcCollect" | "gcHeapBytes" | "sleep" | "getInput" | "enumerate"));
         if !builtin {
             self.cx.narrowed.retain(|k, _| !k.starts_with("g_"));
         }
@@ -863,6 +863,10 @@ impl<'a> Gen<'a> {
         if let ExprKind::Member(obj, method) = &callee.kind {
             if matches!(&obj.kind, ExprKind::Ident(n) if n == "super") {
                 return self.super_call(method, args, span);
+            }
+            if let Some(f) = self.static_target(obj, method) {
+                let callee = Expr { kind: ExprKind::Ident(f), span: callee.span };
+                return self.call(&callee, args, span);
             }
             if let Some(r) = self.enum_static_call(obj, method, args, span) {
                 return r;
@@ -901,7 +905,7 @@ impl<'a> Gen<'a> {
         }
         let Some(&decl) = self.fns.get(name) else {
             let mut names: Vec<&str> = self.fns.keys().map(|k| k.as_str()).collect();
-            names.extend(["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "min", "max", "sum", "abs", "len"]);
+            names.extend(["print", "str", "int", "float", "gcCollect", "gcHeapBytes", "sleep", "readFile", "writeFile", "getInput", "enumerate", "min", "max", "sum", "abs", "len"]);
             let hint = did_you_mean(name, names);
             return err(format!("undefined function '{}'{}", name, hint), span);
         };
@@ -1104,6 +1108,27 @@ impl<'a> Gen<'a> {
                 }
                 s.push_str("sn_print_nl(); })");
                 Ok(E::new(s, Ty::Void, false))
+            }
+            "enumerate" => {
+                if args.len() != 1 {
+                    return err("enumerate() takes one list, e.g. for i, x in enumerate(items)", span);
+                }
+                let l = self.val(&args[0].value)?;
+                let Ty::List(el) = l.ty else {
+                    return err(format!("enumerate() needs a list, got {}", l.ty.name()), args[0].value.span);
+                };
+                let tt = Ty::tuple_of(vec![Ty::Int, *el]);
+                let lty = Ty::list_of(tt);
+                let (src, tn, ln) = (self.type_name(l.ty), self.type_name(tt), self.type_name(lty));
+                let n = self.fresh();
+                Ok(E::new(
+                    format!(
+                        "({{ {src}* s{n} = {l}; {ln}* r{n} = {ln}_new(s{n}->len); for (int64_t i = 0; i < s{n}->len; i++) {ln}_push(r{n}, ({tn}){{i + 1, s{n}->data[i]}}); r{n}; }})",
+                        src = src, ln = ln, tn = tn, n = n, l = l.c
+                    ),
+                    lty,
+                    false,
+                ))
             }
             "getInput" => {
                 if args.len() > 1 {
@@ -1550,6 +1575,17 @@ impl<'a> Gen<'a> {
                 Ok(())
             }
             StmtKind::Assign { target, op, value } => {
+                let rewritten;
+                let target = match &target.kind {
+                    ExprKind::Member(obj, m) => match self.static_target(obj, m) {
+                        Some(n) => {
+                            rewritten = Expr { kind: ExprKind::Ident(n), span: target.span };
+                            &rewritten
+                        }
+                        None => target,
+                    },
+                    _ => target,
+                };
                 let ExprKind::Ident(name) = &target.kind else {
                     return self.assign_other(target, *op, value, s.span);
                 };
@@ -1754,6 +1790,7 @@ impl<'a> Gen<'a> {
                 ),
                 f.span,
             ),
+            StmtKind::Static(_) => err("'static' is only allowed inside a class body", s.span),
             StmtKind::Enum(e) => err(
                 format!("enum '{}' must be declared at module level, not inside a function or block", e.name),
                 s.span,

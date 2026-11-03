@@ -750,9 +750,26 @@ impl<'a> Gen<'a> {
 
     // ---------------- members ----------------
 
+    /// `Class.name` where `Class__name` is a static function or variable.
+    pub(super) fn static_target(&mut self, obj: &Expr, name: &str) -> Option<String> {
+        let ExprKind::Ident(cn) = &obj.kind else { return None };
+        if !self.class_ix.contains_key(cn.as_str()) || self.var_exists(cn) {
+            return None;
+        }
+        let cand = format!("{}__{}", cn, name);
+        if self.fns.contains_key(cand.as_str()) || self.globals.contains_key(cand.as_str()) {
+            Some(cand)
+        } else {
+            None
+        }
+    }
+
     pub(super) fn member_expr(&mut self, obj: &Expr, name: &str, span: Span) -> R<E> {
         if matches!(&obj.kind, ExprKind::Ident(n) if n == "super") {
             return err("'super' can only be used as super.method(...)", span);
+        }
+        if let Some(n) = self.static_target(obj, name) {
+            return self.expr(&Expr { kind: ExprKind::Ident(n), span });
         }
         if let Some(r) = self.enum_variant(obj, name, span) {
             return r;

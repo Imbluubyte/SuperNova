@@ -533,7 +533,7 @@ impl<'a> Gen<'a> {
         let n = self.fresh();
         let l = format!("l{}", n);
         let head = format!("{}* {} = {};", ln, l, o.c);
-        if matches!(name, "map" | "each" | "reduce" | "any" | "all" | "join") {
+        if matches!(name, "map" | "each" | "reduce" | "any" | "all" | "join" | "sortBy") {
             return self.list_functional(o, elem, name, args, span);
         }
         match name {
@@ -583,6 +583,78 @@ impl<'a> Gen<'a> {
                         "({{ {head} {ec} x{n} = {c}; bool found{n} = false; for (int64_t i{n} = 0; i{n} < {l}->len; i{n}++) {{ if ({test_c}) {{ {del}found{n} = true; break; }} }} found{n}; }})"
                     ),
                     Ty::Bool,
+                    false,
+                ))
+            }
+            "insert" => {
+                expect_args(name, args, 2, span)?;
+                let i = self.val(&args[0].value)?;
+                if i.ty != Ty::Int {
+                    return err(format!("insert() needs an Int position first, got {}", i.ty.name()), args[0].value.span);
+                }
+                let v = self.hinted(&args[1].value, Some(elem))?;
+                let vty = v.ty;
+                let Some(c) = self.coerce(v.c, vty, elem) else {
+                    return err(format!("cannot insert a {} value into a {}", vty.name(), o.ty.name()), span);
+                };
+                Ok(E::new(
+                    format!("({{ {head} int64_t p{n} = {}; {ec} v{n} = {c}; {ln}_insert({l}, p{n}, v{n}, {loc}); }})", i.c),
+                    Ty::Void,
+                    false,
+                ))
+            }
+            "pop" => {
+                if args.len() > 1 {
+                    return err("pop() takes an optional position", span);
+                }
+                let pos = match args.first() {
+                    Some(a) => {
+                        let i = self.val(&a.value)?;
+                        if i.ty != Ty::Int {
+                            return err(format!("pop() needs an Int position, got {}", i.ty.name()), a.value.span);
+                        }
+                        i.c
+                    }
+                    None => format!("{}->len", l),
+                };
+                Ok(E::new(format!("({{ {head} {ln}_pop({l}, {pos}, {loc}); }})"), elem, false))
+            }
+            "first" | "last" => {
+                expect_args(name, args, 0, span)?;
+                let at = if name == "first" { "1".to_string() } else { format!("{}->len", l) };
+                Ok(E::new(format!("({{ {head} *{ln}_at({l}, {at}, {loc}); }})"), elem, false))
+            }
+            "slice" => {
+                expect_args(name, args, 2, span)?;
+                let a = self.val(&args[0].value)?;
+                let b = self.val(&args[1].value)?;
+                if a.ty != Ty::Int || b.ty != Ty::Int {
+                    return err("slice(from, to) needs two Int positions (inclusive, starting at 1)", span);
+                }
+                Ok(E::new(
+                    format!("({{ {head} int64_t a{n} = {}; int64_t b{n} = {}; {ln}_slice({l}, a{n}, b{n}, {loc}); }})", a.c, b.c),
+                    o.ty,
+                    false,
+                ))
+            }
+            "index" => {
+                expect_args(name, args, 1, span)?;
+                let v = self.val(&args[0].value)?;
+                let vty = v.ty;
+                let Some(c) = self.coerce(v.c, vty, elem) else {
+                    return err(format!("a {} cannot contain a {} value", o.ty.name(), vty.name()), span);
+                };
+                let x = E::new(format!("x{}", n), elem, true);
+                let cur = E::new(format!("{}->data[i{}]", l, n), elem, true);
+                let test = self.binary(BinOp::Eq, cur, x, span)?;
+                let oty = Ty::opt_of(Ty::Int);
+                let on = self.type_name(oty);
+                Ok(E::new(
+                    format!(
+                        "({{ {head} {ec} x{n} = {c}; {on} r{n} = {{0}}; for (int64_t i{n} = 0; i{n} < {l}->len; i{n}++) {{ if ({}) {{ r{n}.has = true; r{n}.v = i{n} + 1; break; }} }} r{n}; }})",
+                        test.c
+                    ),
+                    oty,
                     false,
                 ))
             }

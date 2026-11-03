@@ -389,6 +389,14 @@ inside the `if`; to pick values out of a mixed list by type use `items.filter(in
 Note that `/` always produces a Float (`20 / 10` is `2.0`), so `(x / 10).type() == Int` is never
 true. To test divisibility use `x % 10 == 0`.
 
+## Formatting, iteration and list helpers
+
+* F-string specs: `f"{x:.2f}"`, `{n:05d}`, `{s:>8}`, `{s:*^9}`, `{n:x}`, `{n:+d}` (`[[fill]align][+][0][width][.prec][type]`).
+* `for i, v in enumerate(xs)` and `for k, v in d.items()` unpack tuples.
+* `static` members in classes: `static var count = 0`, `static fn make()`; use as `Class.name`.
+* List methods: `insert(i, v)`, `pop()` / `pop(i)`, `index(v)` (Int?, 1-based, null if absent), `first()`, `last()`,
+  `slice(a, b)` (inclusive, 1-based), `sortBy(fn)` (stable; key Int/Float/String).
+
 ## Standard library
 
 Modules shipped inside the compiler; import them with `use std.<name>`:

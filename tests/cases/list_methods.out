@@ -1,0 +1,11 @@
+[9, 3, 1, 2]
+2 [9, 3, 1] 9 [3, 1]
+null null 0
+10 40 [20, 30]
+["al", "bob", "christine"]
+b
+c
+a
+[2.5, 1.5, 0.5]
+list index 5 is out of range (length 1; indexes start at 1)
+list index 1 is out of range (length 0; indexes start at 1)

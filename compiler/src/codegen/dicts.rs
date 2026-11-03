@@ -203,6 +203,20 @@ impl<'a> Gen<'a> {
                 want(0)?;
                 Ok(E::new(format!("({})->count", o.c), Ty::Int, o.pure))
             }
+            "items" => {
+                want(0)?;
+                let tt = Ty::tuple_of(vec![kt, vt]);
+                let lty = Ty::list_of(tt);
+                let (tn, ln) = (self.type_name(tt), self.type_name(lty));
+                Ok(E::new(
+                    format!(
+                        "({{ {dn}* d{n} = {d}; {ln}* r{n} = {ln}_new(d{n}->count); for (int64_t i = 0; i < d{n}->used; i++) if (d{n}->ent[i].live) {ln}_push(r{n}, ({tn}){{d{n}->ent[i].k, d{n}->ent[i].v}}); r{n}; }})",
+                        dn = dn, ln = ln, tn = tn, n = n, d = o.c
+                    ),
+                    lty,
+                    false,
+                ))
+            }
             "keys" => {
                 want(0)?;
                 Ok(self.dict_listing(o, true))
@@ -274,10 +288,10 @@ impl<'a> Gen<'a> {
             }
             _ => err(
                 format!(
-                    "{} has no method '{}'{} (available: length, keys, values, contains, get, remove, merge, clear)",
+                    "{} has no method '{}'{} (available: length, keys, values, items, contains, get, remove, merge, clear)",
                     o.ty.name(),
                     name,
-                    super::did_you_mean(name, ["length", "keys", "values", "contains", "get", "remove", "merge", "clear"])
+                    super::did_you_mean(name, ["length", "keys", "values", "items", "contains", "get", "remove", "merge", "clear"])
                 ),
                 span,
             ),

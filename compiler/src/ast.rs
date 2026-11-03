@@ -139,6 +139,8 @@ pub struct ClassDecl {
     pub parent: Option<String>,
     pub fields: Vec<Stmt>,
     pub methods: Vec<FnDecl>,
+    /// Static members, already renamed `Class__name`; the parser moves them next to the class.
+    pub statics: Vec<Stmt>,
     pub is_private: bool,
     /// `export class`: the host can create instances and call their public members.
     pub is_export: bool,
@@ -161,6 +163,8 @@ pub enum StmtKind {
         init: Expr,
     },
     Assign { target: Expr, op: Option<BinOp>, value: Expr },
+    /// `static fn` / `static var` inside a class body (hoisted to module level by the parser).
+    Static(Box<Stmt>),
     Expr(Expr),
     If { branches: Vec<(Expr, Vec<Stmt>)>, else_body: Option<Vec<Stmt>> },
     While { cond: Expr, body: Vec<Stmt> },

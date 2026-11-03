@@ -614,6 +614,7 @@ impl<'a> Rn<'a> {
                 }
                 self.function(f, None)?;
             }
+            StmtKind::Static(_) => {}
             StmtKind::Enum(e) => {
                 if top {
                     e.name = self.mangle(&e.name);

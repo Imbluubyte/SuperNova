@@ -1,0 +1,32 @@
+var xs = [3, 1, 2]
+xs.insert(1, 9)
+print(xs)
+print(xs.pop(), xs, xs.pop(1), xs)
+print(xs.index(2), xs.index(99), xs.index(2) ?? 0)
+var ys = [10, 20, 30, 40]
+print(ys.first(), ys.last(), ys.slice(2, 3))
+var names = ["bob", "al", "christine"]
+names.sortBy(fn(s) => s.length())
+print(names)
+class P:
+	var name = ""
+	var score = 0
+	fn onCreation(n: String, s: Int):
+		name = n
+		score = s
+var ps = [P("a", 3), P("b", 1), P("c", 2)]
+ps.sortBy(fn(p) => p.score)
+for p in ps:
+	print(p.name)
+var fl = [2.5, 0.5, 1.5]
+fl.sortBy(fn(f) => -f)
+print(fl)
+try:
+	[1].pop(5)
+catch e:
+	print(e)
+try:
+	var e: List[Int] = []
+	e.first()
+catch e2:
+	print(e2)

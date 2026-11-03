@@ -196,6 +196,46 @@ static inline SnStr *sn_bool_to_str(bool v) {
 }
 static inline SnStr *sn_null_to_str(int8_t v) { (void)v; return sn_str_new("null", 4); }
 
+/* f-string format specs: {x:.2f} {n:05} {s:>10} {n:x} */
+static SnStr *sn_fmtspec_float(double v, char t, int prec, int plus) {
+    char f[16], buf[512];
+    snprintf(f, sizeof f, "%%%s.*%c", plus == 1 ? "+" : plus == 2 ? " " : "", t);
+    int n = snprintf(buf, sizeof buf, f, prec, v);
+    if (n < 0) n = 0;
+    if (n >= (int)sizeof buf) n = (int)sizeof buf - 1;
+    return sn_str_new(buf, n);
+}
+static SnStr *sn_fmt_int(int64_t v, char t, int plus) {
+    char tmp[80], *e = tmp + sizeof tmp, *p = e;
+    uint64_t u = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+    unsigned base = t == 'x' || t == 'X' ? 16 : t == 'b' ? 2 : t == 'o' ? 8 : 10;
+    const char *digits = t == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+    do { *--p = digits[u % base]; u /= base; } while (u);
+    if (v < 0) *--p = '-'; else if (plus == 1) *--p = '+'; else if (plus == 2) *--p = ' ';
+    return sn_str_new(p, (int64_t)(e - p));
+}
+static SnStr *sn_fmt_trunc(SnStr *s, int64_t n) { return s->len > n ? sn_str_new(s->data, n) : s; }
+/* align: '<' '>' '^'; zero pads after the sign */
+static SnStr *sn_fmt_pad(SnStr *s, int64_t width, char align, char fill, int zero) {
+    if (s->len >= width) return s;
+    int64_t pad = width - s->len;
+    SnStr *r = (SnStr *)sn_gc_alloc(sizeof(SnStr) + (size_t)width + 1, 1);
+    r->len = width;
+    int64_t left = align == '<' ? 0 : align == '^' ? pad / 2 : pad;
+    if (zero) {
+        int64_t sign = (s->len > 0 && (s->data[0] == '-' || s->data[0] == '+' || s->data[0] == ' ')) ? 1 : 0;
+        memcpy(r->data, s->data, (size_t)sign);
+        memset(r->data + sign, '0', (size_t)pad);
+        memcpy(r->data + sign + pad, s->data + sign, (size_t)(s->len - sign));
+    } else {
+        memset(r->data, fill, (size_t)left);
+        memcpy(r->data + left, s->data, (size_t)s->len);
+        memset(r->data + left + s->len, fill, (size_t)(pad - left));
+    }
+    r->data[width] = 0;
+    return r;
+}
+
 /* ---------- printing ---------- */
 
 static inline void sn_print_int(int64_t v) { printf("%" PRId64, v); }
@@ -351,6 +391,18 @@ static inline void N##_push(N *l, T v) { \
 static inline T *N##_at(N *l, int64_t i, const char *loc) { \
     if (i < 1 || i > l->len) sn_list_oob(loc, i, l->len); return &l->data[i - 1]; } \
 static inline void N##_clear(N *l) { l->len = 0; } \
+static inline void N##_insert(N *l, int64_t i, T v, const char *loc) { \
+    if (i < 1 || i > l->len + 1) sn_list_oob(loc, i, l->len); \
+    N##_push(l, v); \
+    memmove(&l->data[i], &l->data[i - 1], sizeof(T) * (size_t)(l->len - i)); l->data[i - 1] = v; } \
+static inline T N##_pop(N *l, int64_t i, const char *loc) { \
+    if (i < 1 || i > l->len) sn_list_oob(loc, i, l->len); \
+    T v = l->data[i - 1]; \
+    memmove(&l->data[i - 1], &l->data[i], sizeof(T) * (size_t)(l->len - i)); l->len--; return v; } \
+static inline N *N##_slice(N *l, int64_t a, int64_t b, const char *loc) { \
+    if (a < 1 || b > l->len || a > b + 1) \
+        sn_panic(loc, "slice %" PRId64 "..%" PRId64 " is out of range (list length %" PRId64 "; indexes start at 1)", a, b, l->len); \
+    N *r = N##_new(b - a + 1); memcpy(r->data, &l->data[a - 1], sizeof(T) * (size_t)(b - a + 1)); r->len = b - a + 1; return r; } \
 static inline void N##_reverse(N *l) { \
     for (int64_t a = 0, b = l->len - 1; a < b; a++, b--) { T t = l->data[a]; l->data[a] = l->data[b]; l->data[b] = t; } } \
 static inline N *N##_copy(N *l) { N *r = N##_new(l->len); memcpy(r->data, l->data, sizeof(T) * (size_t)l->len); r->len = l->len; return r; } \
@@ -373,6 +425,30 @@ static inline void N##_sort(N *l) { qsort(l->data, (size_t)l->len, sizeof(T), N#
 #define SN_DEFINE_LIST_STRSORT(N) \
 static int N##_cmp(const void *a, const void *b) { return sn_str_cmp(*(SnStr *const *)a, *(SnStr *const *)b); } \
 static inline void N##_sort(N *l) { qsort(l->data, (size_t)l->len, sizeof(SnStr *), N##_cmp); }
+
+/* stable sort of `data` (n elements of `esz` bytes) by parallel keys: kind 0 = int64_t, 1 = double, 2 = SnStr* */
+static void sn_sort_by(void *data, size_t esz, int64_t n, const void *keys, int kind) {
+    if (n < 2) return;
+    int64_t *idx = (int64_t *)sn_xmalloc(sizeof(int64_t) * (size_t)n), *tmp = (int64_t *)sn_xmalloc(sizeof(int64_t) * (size_t)n);
+    for (int64_t i = 0; i < n; i++) idx[i] = i;
+    #define SN_KLT(a, b) (kind == 0 ? ((const int64_t *)keys)[a] < ((const int64_t *)keys)[b] \
+        : kind == 1 ? ((const double *)keys)[a] < ((const double *)keys)[b] \
+        : sn_str_cmp(((SnStr *const *)keys)[a], ((SnStr *const *)keys)[b]) < 0)
+    for (int64_t w = 1; w < n; w *= 2) {
+        for (int64_t lo = 0; lo < n; lo += 2 * w) {
+            int64_t mid = lo + w < n ? lo + w : n, hi = lo + 2 * w < n ? lo + 2 * w : n, i = lo, j = mid, k = lo;
+            while (i < mid && j < hi) tmp[k++] = SN_KLT(idx[j], idx[i]) ? idx[j++] : idx[i++];
+            while (i < mid) tmp[k++] = idx[i++];
+            while (j < hi) tmp[k++] = idx[j++];
+        }
+        int64_t *t = idx; idx = tmp; tmp = t;
+    }
+    #undef SN_KLT
+    char *copy = (char *)sn_xmalloc(esz * (size_t)n);
+    memcpy(copy, data, esz * (size_t)n);
+    for (int64_t i = 0; i < n; i++) memcpy((char *)data + esz * (size_t)i, copy + esz * (size_t)idx[i], esz);
+    free(copy); free(idx); free(tmp);
+}
 
 /* ---------- dictionaries: insertion-ordered open-addressing hash maps ---------- */
 

@@ -1,0 +1,22 @@
+class Vec2:
+	var x = 0.0
+	var y = 0.0
+	static var count = 0
+	static const zeroX = 0.0
+	fn onCreation(x: Float = 0.0, y: Float = 0.0):
+		self.x = x
+		self.y = y
+		Vec2.count += 1
+	static fn make(a: Float, b: Float) -> Vec2:
+		return Vec2(a, b)
+	static fn origin() -> Vec2:
+		return Vec2()
+	fn length2() -> Float:
+		return x * x + y * y
+
+var v = Vec2.make(3.0, 4.0)
+print(v.length2(), Vec2.count)
+var o = Vec2.origin()
+print(Vec2.count, Vec2.zeroX)
+Vec2.count = 10
+print(Vec2.count)

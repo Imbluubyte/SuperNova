@@ -46,7 +46,97 @@ fn intrinsic(name: &str) -> Option<(Vec<Ty>, Ty, &'static str)> {
 }
 
 impl<'a> Gen<'a> {
+    /// `{value:spec}` inside an f-string (the parser turns it into `__fmt(value, "spec")`).
+    fn fmt_spec(&mut self, args: &[Arg], span: Span) -> R<E> {
+        let ExprKind::Str(spec) = &args[1].value.kind else { unreachable!() };
+        let bad = |why: &str| -> R<E> { err(format!("invalid format spec '{}': {}", spec, why), span) };
+        let ch: Vec<char> = spec.chars().collect();
+        let mut i = 0;
+        let (mut fill, mut align) = (' ', None);
+        if ch.len() >= 2 && matches!(ch[1], '<' | '>' | '^') {
+            fill = ch[0];
+            align = Some(ch[1]);
+            i = 2;
+        } else if !ch.is_empty() && matches!(ch[0], '<' | '>' | '^') {
+            align = Some(ch[0]);
+            i = 1;
+        }
+        let mut plus = 0;
+        if i < ch.len() && matches!(ch[i], '+' | ' ') {
+            plus = if ch[i] == '+' { 1 } else { 2 };
+            i += 1;
+        }
+        let mut zero = false;
+        if i < ch.len() && ch[i] == '0' {
+            zero = true;
+            i += 1;
+        }
+        let mut width = 0usize;
+        while i < ch.len() && ch[i].is_ascii_digit() {
+            width = width * 10 + ch[i].to_digit(10).unwrap() as usize;
+            i += 1;
+        }
+        let mut prec: Option<usize> = None;
+        if i < ch.len() && ch[i] == '.' {
+            i += 1;
+            let mut p = 0usize;
+            let start = i;
+            while i < ch.len() && ch[i].is_ascii_digit() {
+                p = p * 10 + ch[i].to_digit(10).unwrap() as usize;
+                i += 1;
+            }
+            if i == start {
+                return bad("a number must follow '.'");
+            }
+            prec = Some(p);
+        }
+        let ty = if i < ch.len() { Some(ch[i]) } else { None };
+        if i + usize::from(ty.is_some()) < ch.len() {
+            return bad("unexpected characters at the end");
+        }
+        if !fill.is_ascii() {
+            return bad("the fill character must be ASCII");
+        }
+        let v = self.val(&args[0].value)?;
+        let numeric = matches!(v.ty, Ty::Int | Ty::Float);
+        let body: String = match (v.ty, ty) {
+            (Ty::Float, None) | (Ty::Int, None) | (Ty::Float, Some('f' | 'F' | 'e' | 'E' | 'g' | 'G')) | (Ty::Int, Some('f' | 'F' | 'e' | 'E' | 'g' | 'G')) => {
+                let t = ty.unwrap_or('f');
+                if v.ty == Ty::Int && ty.is_none() && prec.is_none() {
+                    format!("sn_fmt_int({}, 'd', {})", v.c, plus)
+                } else if v.ty == Ty::Float && ty.is_none() && prec.is_none() {
+                    if plus == 0 { format!("sn_float_to_str({})", v.c) } else { format!("sn_fmtspec_float({}, 'g', 17, {})", v.c, plus) }
+                } else {
+                    format!("sn_fmtspec_float((double)({}), '{}', {}, {})", v.c, t, prec.unwrap_or(6), plus)
+                }
+            }
+            (Ty::Int, Some(t @ ('d' | 'x' | 'X' | 'b' | 'o'))) => format!("sn_fmt_int({}, '{}', {})", v.c, t, plus),
+            (Ty::Str, None | Some('s')) => match prec {
+                Some(p) => format!("sn_fmt_trunc({}, {})", v.c, p),
+                None => v.c.clone(),
+            },
+            (_, None) => {
+                let s = self.to_str(&v);
+                match prec {
+                    Some(p) => format!("sn_fmt_trunc({}, {})", s, p),
+                    None => s,
+                }
+            }
+            (t, Some(c)) => return bad(&format!("'{}' cannot be used with a {}", c, t.name())),
+        };
+        let align = align.unwrap_or(if numeric { '>' } else { '<' });
+        let c = if width > 0 || zero {
+            format!("sn_fmt_pad({}, {}, '{}', '{}', {})", body, width, align, if fill == '\'' || fill == '\\' { ' ' } else { fill }, if zero && numeric { 1 } else { 0 })
+        } else {
+            body
+        };
+        Ok(E::new(c, Ty::Str, false))
+    }
+
     pub(super) fn intrinsic_call(&mut self, name: &str, args: &[Arg], span: Span) -> R<E> {
+        if name == "__fmt" {
+            return self.fmt_spec(args, span);
+        }
         let Some((ptys, ret, tmpl)) = intrinsic(name) else {
             return err(format!("undefined function '{}'", name), span);
         };

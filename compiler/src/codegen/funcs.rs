@@ -190,6 +190,29 @@ impl<'a> Gen<'a> {
                 });
                 Ok(E::new(text, Ty::Str, false))
             }
+            "sortBy" => {
+                want(1)?;
+                let (f, ret) = self.func_arg(&args[0].value, &[elem], &who)?;
+                let kind = match ret {
+                    Ty::Int => 0,
+                    Ty::Float => 1,
+                    Ty::Str => 2,
+                    _ => {
+                        return err(
+                            format!("sortBy() needs a function returning an Int, Float or String key, but this one returns {}", ret.name()),
+                            args[0].value.span,
+                        )
+                    }
+                };
+                let (fc, kc, ec) = (self.cty(f.ty), self.cty(ret), self.cty(elem));
+                let text = self.ordered(vec![o, f], |c| {
+                    format!(
+                        "({{ {ln}* l{n} = {l}; {fc} f{n} = {f}; {kc} *k{n} = ({kc} *)sn_gc_alloc(sizeof({kc}) * (size_t)(l{n}->len + 1), {atomic}); for (int64_t i{n} = 0; i{n} < l{n}->len; i{n}++) k{n}[i{n}] = f{n}.f(f{n}.env, l{n}->data[i{n}]); sn_sort_by(l{n}->data, sizeof({ec}), l{n}->len, k{n}, {kind}); }})",
+                        ln = ln, n = n, l = c[0], fc = fc, f = c[1], kc = kc, ec = ec, kind = kind, atomic = if kind == 2 { 0 } else { 1 }
+                    )
+                });
+                Ok(E::new(text, Ty::Void, false))
+            }
             "map" | "each" | "any" | "all" => {
                 want(1)?;
                 let (f, ret) = self.func_arg(&args[0].value, &[elem], &who)?;

@@ -1,0 +1,12 @@
+var d = {"a": 1, "b": 2}
+for k, v in d.items():
+	print(k, v)
+var names = ["x", "y", "z"]
+for i, n in enumerate(names):
+	print(i, n)
+var pairs = [(1, "one"), (2, "two")]
+for num, word in pairs:
+	print(f"{num}={word}")
+for a, b, c in [(1, 2, 3)]:
+	print(a + b + c)
+print(d.items())

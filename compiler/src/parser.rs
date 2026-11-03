@@ -16,10 +16,30 @@ pub fn parse_file(src: &str, file: u16) -> PResult<Module> {
     let mut items = Vec::new();
     p.skip_newlines();
     while !p.at(&Tok::Eof) {
-        items.push(p.statement()?);
+        let mut s = p.statement()?;
+        let statics = match &mut s.kind {
+            StmtKind::Class(c) => std::mem::take(&mut c.statics),
+            _ => Vec::new(),
+        };
+        items.push(s);
+        items.extend(statics);
         p.skip_newlines();
     }
     Ok(Module { items })
+}
+
+/// Split `x:.2f` into the expression and its format spec (a ':' inside brackets does not count).
+fn split_format_spec(src: &str) -> (&str, Option<&str>) {
+    let mut depth = 0i32;
+    for (i, c) in src.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ':' if depth == 0 => return (&src[..i], Some(src[i + 1..].trim())),
+            _ => {}
+        }
+    }
+    (src, None)
 }
 
 fn parse_expr_str(src: &str, span: Span) -> PResult<Expr> {
@@ -195,6 +215,11 @@ impl Parser {
                 c.is_export = true;
                 StmtKind::Class(c)
             }
+            Tok::Ident(ref n) if n == "static" && matches!(self.peek_at(1), Tok::Fn | Tok::Var | Tok::Const) => {
+                self.bump();
+                let inner = self.statement()?;
+                StmtKind::Static(Box::new(inner))
+            }
             Tok::Ident(ref n) if n == "elif" => {
                 return Err(CompileError::new(
                     "'elif' is not part of SuperNova; use 'orif'",
@@ -223,10 +248,36 @@ impl Parser {
             Tok::For => {
                 self.bump();
                 let var = self.ident("loop variable")?;
+                let mut more = Vec::new();
+                while self.eat(&Tok::Comma) {
+                    more.push(self.ident("loop variable")?);
+                }
                 self.expect(&Tok::In, "'in'")?;
                 let iter = self.expr()?;
-                let body = self.block()?;
-                StmtKind::For { var, iter, body }
+                let mut body = self.block()?;
+                if more.is_empty() {
+                    StmtKind::For { var, iter, body }
+                } else {
+                    // `for a, b in pairs` unpacks each tuple: for __it in pairs: var a = __it[1] ...
+                    let tmp = format!("__it{}_{}", span.line, span.col);
+                    let mut unpack = Vec::new();
+                    for (i, name) in std::iter::once(var).chain(more).enumerate() {
+                        let target = Expr { kind: ExprKind::Ident(tmp.clone()), span };
+                        let index = Expr { kind: ExprKind::Int(i as i64 + 1), span };
+                        unpack.push(Stmt {
+                            kind: StmtKind::VarDecl {
+                                name,
+                                is_const: false,
+                                is_private: false,
+                                ty: None,
+                                init: Expr { kind: ExprKind::Index(Box::new(target), Box::new(index)), span },
+                            },
+                            span,
+                        });
+                    }
+                    unpack.append(&mut body);
+                    StmtKind::For { var: tmp, iter, body: unpack }
+                }
             }
             Tok::Match => self.match_stmt()?,
             Tok::Return => {
@@ -478,8 +529,18 @@ impl Parser {
         let body = self.block()?;
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut statics = Vec::new();
         for s in body {
             match s.kind {
+                StmtKind::Static(inner) => {
+                    let mut inner = *inner;
+                    match &mut inner.kind {
+                        StmtKind::Fn(f) => f.name = format!("{}__{}", name, f.name),
+                        StmtKind::VarDecl { name: n, .. } => *n = format!("{}__{}", name, n),
+                        _ => unreachable!(),
+                    }
+                    statics.push(inner);
+                }
                 StmtKind::VarDecl { .. } => fields.push(s),
                 StmtKind::Fn(f) => methods.push(f),
                 StmtKind::Pass => {}
@@ -491,7 +552,7 @@ impl Parser {
                 }
             }
         }
-        Ok(ClassDecl { name, parent, fields, methods, is_private: false, is_export: false, span })
+        Ok(ClassDecl { name, parent, fields, methods, statics, is_private: false, is_export: false, span })
     }
 
     fn if_stmt(&mut self) -> PResult<StmtKind> {
@@ -806,7 +867,23 @@ impl Parser {
                 for p in parts {
                     match p {
                         FPart::Text(t) => out.push(FStrPart::Text(t)),
-                        FPart::Expr(src, sp) => out.push(FStrPart::Expr(parse_expr_str(&src, sp)?)),
+                        FPart::Expr(src, sp) => {
+                            let (code, spec) = split_format_spec(&src);
+                            let mut e = parse_expr_str(code, sp)?;
+                            if let Some(spec) = spec {
+                                e = Expr {
+                                    kind: ExprKind::Call(
+                                        Box::new(Expr { kind: ExprKind::Ident("__fmt".into()), span: sp }),
+                                        vec![
+                                            Arg { name: None, value: e },
+                                            Arg { name: None, value: Expr { kind: ExprKind::Str(spec.to_string()), span: sp } },
+                                        ],
+                                    ),
+                                    span: sp,
+                                };
+                            }
+                            out.push(FStrPart::Expr(e))
+                        }
                     }
                 }
                 ExprKind::FStr(out)
